@@ -1,0 +1,39 @@
+# Node
+node_modules/
+npm-debug.log
+dist/
+build/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Azure
+.azure/
+azure.yaml
+
+# Docs
+*.md
+LICENSE
+
+# Tests
+*.test.ts
+*.spec.ts
+
+# Config (will be provided via environment)
+config.Development.json
+config.json
+
+# Infrastructure
+infra/
+samples/
+
+# Docker
+Dockerfile
+.dockerignore

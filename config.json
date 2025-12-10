@@ -1,0 +1,18 @@
+{
+  "AzureAd": {
+    "Instance": "https://login.microsoftonline.com/",
+    "TenantId": "",
+    "ClientId": "",
+    "Audience": "",
+    "ClientSecret": ""
+  },
+  "Dataverse": {
+    "Url": "",
+    "ApiVersion": "v9.2"
+  },
+  "McpServer": {
+    "SessionTimeoutMinutes": 60,
+    "RequestTimeoutMinutes": 60
+  },
+  "AllowedHosts": "*"
+}
