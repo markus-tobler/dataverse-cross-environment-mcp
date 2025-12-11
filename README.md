@@ -2,6 +2,9 @@
 
 A Model Context Protocol (MCP) server that provides secure access to Microsoft Dataverse through OAuth 2.0 authentication. This server enables AI agents and applications to interact with Dataverse data using the MCP standard.
 
+> [!NOTE]
+> The main purpose for this MCP is to provide Dataverse Access (e.g. CRM) accross environment boundaries. Thus, users can build Agents in a Copilot Studio environment while safely accessing CRM Data in another environment.
+
 ## Getting Started
 
 For step-by-step installation and registration instructions, see the **[Installation Guide](./INSTALLATION_GUIDE.md)**.
@@ -249,8 +252,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
-trademarks or logos is subject to and must follow
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/legal/intellectualproperty/trademarks/usage/general).
+This project may contain trademarks or logos for projects, products, or services. 
 Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
 Any use of third-party trademarks or logos are subject to those third-party's policies.
