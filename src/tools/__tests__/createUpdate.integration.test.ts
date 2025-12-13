@@ -104,7 +104,8 @@ describe("create_record and update_record tools", () => {
     const result = await handler(params);
 
     expect(result.content[0].text).toContain(
-      "Error creating record: Creation failed"
+      "Error creating record in table 'account'"
     );
+    expect(result.content[0].text).toContain("Creation failed");
   });
 });
