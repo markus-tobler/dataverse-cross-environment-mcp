@@ -22,7 +22,11 @@ describe("Describe Table Tool Integration", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    server = { tool: jest.fn() } as any;
+    const toolMock = jest.fn();
+    server = {
+      tool: toolMock,
+      registerTool: toolMock,
+    } as any;
     mockDataverseClient =
       new (DataverseClient as unknown as jest.Mock<DataverseClientType>)() as jest.Mocked<DataverseClientType>;
     contextProvider = {
@@ -35,7 +39,7 @@ describe("Describe Table Tool Integration", () => {
   it("registers describe_table and calls DataverseClient.describeTable", async () => {
     const call = server.tool.mock.calls.find((c) => c[0] === "describe_table");
     expect(call).toBeDefined();
-    const handler = call![3];
+    const handler = call![2];
 
     mockDataverseClient.resolveLogicalName.mockResolvedValue("account");
     mockDataverseClient.describeTable.mockResolvedValue({

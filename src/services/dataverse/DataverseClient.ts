@@ -113,7 +113,11 @@ export class DataverseClient {
     req?: Request
   ): Promise<import("../../types/dataverse.js").QueryResult> {
     const service = await this.createDataverseService(req);
-    return this.dataService.runPredefinedQuery(service, queryIdOrName, tableName);
+    return this.dataService.runPredefinedQuery(
+      service,
+      queryIdOrName,
+      tableName
+    );
   }
 
   async runCustomQuery(
@@ -123,5 +127,24 @@ export class DataverseClient {
   ): Promise<import("../../types/dataverse.js").QueryResult> {
     const service = await this.createDataverseService(req);
     return this.dataService.runCustomQuery(service, fetchXml, tableName);
+  }
+
+  async createRecord(
+    tableName: string,
+    data: Record<string, any>,
+    req?: Request
+  ): Promise<string> {
+    const service = await this.createDataverseService(req);
+    return this.dataService.createRecord(service, tableName, data);
+  }
+
+  async updateRecord(
+    tableName: string,
+    recordId: string,
+    data: Record<string, any>,
+    req?: Request
+  ): Promise<void> {
+    const service = await this.createDataverseService(req);
+    return this.dataService.updateRecord(service, tableName, recordId, data);
   }
 }

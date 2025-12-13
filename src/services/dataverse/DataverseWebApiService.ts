@@ -295,4 +295,55 @@ export class DataverseWebApiService {
   getRecommendedDegreeOfParallelism(): number {
     return this.recommendedDegreeOfParallelism;
   }
+
+  /**
+   * Create a new record in Dataverse
+   */
+  async createRecord(entitySetName: string, data: any): Promise<Response> {
+    return this.sendRequest(entitySetName, "POST", data);
+  }
+
+  /**
+   * Update an existing record in Dataverse
+   */
+  async updateRecord(
+    entitySetName: string,
+    recordId: string,
+    data: any
+  ): Promise<Response> {
+    return this.sendRequest(`${entitySetName}(${recordId})`, "PATCH", data);
+  }
+
+  /**
+   * Retrieve records by attribute value (filter query)
+   */
+  async retrieveRecordByAlternateKey(
+    entitySetName: string,
+    attributeName: string,
+    value: string
+  ): Promise<any> {
+    const response = await this.sendRequest(
+      `${entitySetName}?$filter=${attributeName} eq '${value}'&$top=2`,
+      "GET"
+    );
+    if (response.ok) {
+      return response.json();
+    }
+    return null;
+  }
+
+  /**
+   * Get the organization's base currency ID
+   */
+  async getOrganizationBaseCurrencyId(): Promise<string> {
+    const response = await this.sendRequest(
+      `organizations(${this.organizationId})?$select=_basecurrencyid_value`,
+      "GET"
+    );
+    if (response.ok) {
+      const org = await response.json();
+      return org["_basecurrencyid_value"];
+    }
+    throw new Error("Failed to retrieve organization's base currency.");
+  }
 }

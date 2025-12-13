@@ -22,7 +22,11 @@ describe("Retrieve Record Tool Integration", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    server = { tool: jest.fn() } as any;
+    const toolMock = jest.fn();
+    server = {
+      tool: toolMock,
+      registerTool: toolMock,
+    } as any;
     mockDataverseClient =
       new (DataverseClient as unknown as jest.Mock<DataverseClientType>)() as jest.Mocked<DataverseClientType>;
     contextProvider = {
@@ -35,7 +39,7 @@ describe("Retrieve Record Tool Integration", () => {
   it("registers retrieve_record and calls DataverseClient.retrieveRecord", async () => {
     const call = server.tool.mock.calls.find((c) => c[0] === "retrieve_record");
     expect(call).toBeDefined();
-    const handler = call![3];
+    const handler = call![2];
 
     mockDataverseClient.resolveLogicalName.mockResolvedValue("account");
     mockDataverseClient.retrieveRecord.mockResolvedValue({

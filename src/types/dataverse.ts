@@ -121,6 +121,11 @@ export interface AttributeDescription {
   maxLength?: number;
   format?: string;
   exampleValue: any;
+  targets?: string[];
+  optionSet?: Array<{
+    value: number;
+    label: string;
+  }>;
 }
 
 /**

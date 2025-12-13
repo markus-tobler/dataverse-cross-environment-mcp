@@ -22,7 +22,11 @@ describe("Tool Registration Integration Tests", () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    server = { tool: jest.fn() } as any;
+    const toolMock = jest.fn();
+    server = {
+      tool: toolMock,
+      registerTool: toolMock,
+    } as any;
     mockDataverseClient =
       new (DataverseClient as jest.Mock<DataverseClient>)() as jest.Mocked<DataverseClient>;
 
@@ -45,7 +49,7 @@ describe("Tool Registration Integration Tests", () => {
     // Find registration by name
     const call = server.tool.mock.calls.find((c) => c[0] === "whoami");
     expect(call).toBeDefined();
-    const handler = call![3];
+    const handler = call![2];
 
     const result = await handler({});
     expect(mockDataverseClient.whoAmI).toHaveBeenCalledTimes(1);
@@ -77,7 +81,7 @@ describe("Tool Registration Integration Tests", () => {
 
     const call = server.tool.mock.calls.find((c) => c[0] === "search");
     expect(call).toBeDefined();
-    const handler = call![3];
+    const handler = call![2];
 
     const result = await handler(searchParams);
     expect(mockDataverseClient.search).toHaveBeenCalledWith(

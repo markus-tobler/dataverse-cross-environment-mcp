@@ -901,4 +901,296 @@ export function registerDataverseTools(
       }
     }
   );
+
+  server.registerTool(
+    "create_record",
+    {
+      description:
+        "Create a new record in a Dataverse table. It is recommended to use describe_table first to understand the structure of the record.",
+      inputSchema: z.object({
+        table: z
+          .string()
+          .describe("The logical name of the table to create the record in."),
+        data: z
+          .object({})
+          .passthrough()
+          .describe("A JSON object containing the data for the new record."),
+      }),
+    },
+    async (params: any) => {
+      try {
+        const { table, data } = params;
+        const userInfo = contextProvider.getUserInfo();
+        logger.info(
+          `Executing CreateRecord tool for user ${userInfo} on table ${table}`
+        );
+
+        const req = contextProvider.getContext();
+        const recordId = await dataverseClient.createRecord(table, data, req);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Successfully created record with ID: ${recordId}`,
+            },
+            {
+              type: "resource_link",
+              uri: `dataverse:///${table}/${recordId}`,
+              name: "Created Record",
+              description: `The newly created record in ${table}`,
+              mimeType: "application/json",
+            },
+          ],
+        };
+      } catch (error: any) {
+        logger.error("Error executing CreateRecord tool:", error);
+
+        // Parse error message to provide detailed guidance
+        let errorDetails = error.message || "Unknown error occurred";
+        let helpfulGuidance = "";
+
+        // Lookup resolution errors
+        if (errorDetails.includes("Could not resolve lookup value")) {
+          const attrMatch = errorDetails.match(/attribute (\w+)/);
+          const attribute = attrMatch ? attrMatch[1] : "the lookup field";
+          helpfulGuidance =
+            `\n\nLookup Field Help for '${attribute}':\n` +
+            `Accepted formats:\n` +
+            `  - GUID only: "12345678-1234-1234-1234-123456789abc" (for non-polymorphic lookups)\n` +
+            `  - Web API style: "accounts(12345678-1234-1234-1234-123456789abc)"\n` +
+            `  - Entity/GUID pair: "account=12345678-1234-1234-1234-123456789abc"\n` +
+            `  - Primary name: "Contoso Ltd" (must be unique in the target table)\n\n` +
+            `Use describe_table to see which entity types this lookup can reference.`;
+        }
+        // Option set resolution errors
+        else if (errorDetails.includes("Could not resolve option set value")) {
+          const attrMatch = errorDetails.match(/attribute (\w+)/);
+          const attribute = attrMatch ? attrMatch[1] : "the choice field";
+          helpfulGuidance =
+            `\n\nChoice/Option Set Help for '${attribute}':\n` +
+            `Accepted formats:\n` +
+            `  - Integer value: 1, 2, 727000000, etc.\n` +
+            `  - Label name: "Active", "Inactive", etc. (must be unique)\n\n` +
+            `Use describe_table to see available options for this field.`;
+        }
+        // Multiple matches for lookups or option sets
+        else if (
+          errorDetails.includes("Multiple") &&
+          errorDetails.includes("found")
+        ) {
+          helpfulGuidance =
+            `\n\nThe value you provided matches multiple records or options.\n` +
+            `Please use a more specific identifier:\n` +
+            `  - For lookups: Use the GUID instead of the name\n` +
+            `  - For option sets: Use the integer value instead of the label`;
+        }
+        // Required field errors
+        else if (
+          errorDetails.includes("required") ||
+          errorDetails.includes("Required")
+        ) {
+          helpfulGuidance =
+            `\n\nA required field is missing or invalid.\n` +
+            `Use describe_table to see which fields are required for this table.`;
+        }
+        // Data type errors
+        else if (
+          errorDetails.includes("type") ||
+          errorDetails.includes("invalid")
+        ) {
+          helpfulGuidance =
+            `\n\nData type mismatch detected.\n` +
+            `Use describe_table to see the expected data types and formats for each field.`;
+        }
+        // HTTP errors from Dataverse API
+        else if (
+          errorDetails.includes("400") ||
+          errorDetails.includes("Bad Request")
+        ) {
+          helpfulGuidance =
+            `\n\nThe Dataverse API rejected the request.\n` +
+            `Common causes:\n` +
+            `  - Invalid field names (use describe_table to verify)\n` +
+            `  - Data type mismatches\n` +
+            `  - Required fields missing\n` +
+            `  - Invalid lookup references`;
+        } else if (
+          errorDetails.includes("403") ||
+          errorDetails.includes("Forbidden")
+        ) {
+          helpfulGuidance = `\n\nPermission denied. You don't have sufficient privileges to create records in this table.`;
+        } else if (
+          errorDetails.includes("404") ||
+          errorDetails.includes("Not Found")
+        ) {
+          helpfulGuidance =
+            `\n\nThe table or related record was not found.\n` +
+            `  - Verify the table name using list_tables\n` +
+            `  - For lookups, ensure the referenced record exists`;
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error creating record in table '${params.table}':\n\n${errorDetails}${helpfulGuidance}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    "update_record",
+    {
+      description:
+        "Update an existing record in a Dataverse table. It is recommended to use describe_table first to understand the structure of the record.",
+      inputSchema: z.object({
+        table: z
+          .string()
+          .describe("The logical name of the table to update the record in."),
+        record_id: z.string().describe("The ID of the record to update."),
+        data: z
+          .object({})
+          .passthrough()
+          .describe(
+            "A JSON object containing the data to update on the record."
+          ),
+      }),
+    },
+    async (params: any) => {
+      try {
+        const { table, record_id, data } = params;
+        const userInfo = contextProvider.getUserInfo();
+        logger.info(
+          `Executing UpdateRecord tool for user ${userInfo} on table ${table} and record ${record_id}`
+        );
+
+        const req = contextProvider.getContext();
+        await dataverseClient.updateRecord(table, record_id, data, req);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Successfully updated record with ID: ${record_id}`,
+            },
+            {
+              type: "resource_link",
+              uri: `dataverse:///${table}/${record_id}`,
+              name: "Updated Record",
+              description: `The updated record in ${table}`,
+              mimeType: "application/json",
+            },
+          ],
+        };
+      } catch (error: any) {
+        logger.error("Error executing UpdateRecord tool:", error);
+
+        // Parse error message to provide detailed guidance
+        let errorDetails = error.message || "Unknown error occurred";
+        let helpfulGuidance = "";
+
+        // Lookup resolution errors
+        if (errorDetails.includes("Could not resolve lookup value")) {
+          const attrMatch = errorDetails.match(/attribute (\w+)/);
+          const attribute = attrMatch ? attrMatch[1] : "the lookup field";
+          helpfulGuidance =
+            `\n\nLookup Field Help for '${attribute}':\n` +
+            `Accepted formats:\n` +
+            `  - GUID only: "12345678-1234-1234-1234-123456789abc" (for non-polymorphic lookups)\n` +
+            `  - Web API style: "accounts(12345678-1234-1234-1234-123456789abc)"\n` +
+            `  - Entity/GUID pair: "account=12345678-1234-1234-1234-123456789abc"\n` +
+            `  - Primary name: "Contoso Ltd" (must be unique in the target table)\n\n` +
+            `Use describe_table to see which entity types this lookup can reference.`;
+        }
+        // Option set resolution errors
+        else if (errorDetails.includes("Could not resolve option set value")) {
+          const attrMatch = errorDetails.match(/attribute (\w+)/);
+          const attribute = attrMatch ? attrMatch[1] : "the choice field";
+          helpfulGuidance =
+            `\n\nChoice/Option Set Help for '${attribute}':\n` +
+            `Accepted formats:\n` +
+            `  - Integer value: 1, 2, 727000000, etc.\n` +
+            `  - Label name: "Active", "Inactive", etc. (must be unique)\n\n` +
+            `Use describe_table to see available options for this field.`;
+        }
+        // Multiple matches for lookups or option sets
+        else if (
+          errorDetails.includes("Multiple") &&
+          errorDetails.includes("found")
+        ) {
+          helpfulGuidance =
+            `\n\nThe value you provided matches multiple records or options.\n` +
+            `Please use a more specific identifier:\n` +
+            `  - For lookups: Use the GUID instead of the name\n` +
+            `  - For option sets: Use the integer value instead of the label`;
+        }
+        // Record not found
+        else if (
+          errorDetails.includes("does not exist") ||
+          errorDetails.includes("not found")
+        ) {
+          helpfulGuidance =
+            `\n\nThe record with ID '${params.record_id}' was not found.\n` +
+            `Verify the record ID using search or query tools.`;
+        }
+        // Required field errors
+        else if (
+          errorDetails.includes("required") ||
+          errorDetails.includes("Required")
+        ) {
+          helpfulGuidance =
+            `\n\nA required field is missing or invalid.\n` +
+            `Use describe_table to see which fields are required for this table.`;
+        }
+        // Data type errors
+        else if (
+          errorDetails.includes("type") ||
+          errorDetails.includes("invalid")
+        ) {
+          helpfulGuidance =
+            `\n\nData type mismatch detected.\n` +
+            `Use describe_table to see the expected data types and formats for each field.`;
+        }
+        // HTTP errors from Dataverse API
+        else if (
+          errorDetails.includes("400") ||
+          errorDetails.includes("Bad Request")
+        ) {
+          helpfulGuidance =
+            `\n\nThe Dataverse API rejected the request.\n` +
+            `Common causes:\n` +
+            `  - Invalid field names (use describe_table to verify)\n` +
+            `  - Data type mismatches\n` +
+            `  - Attempting to update read-only fields\n` +
+            `  - Invalid lookup references`;
+        } else if (
+          errorDetails.includes("403") ||
+          errorDetails.includes("Forbidden")
+        ) {
+          helpfulGuidance = `\n\nPermission denied. You don't have sufficient privileges to update this record.`;
+        } else if (
+          errorDetails.includes("404") ||
+          errorDetails.includes("Not Found")
+        ) {
+          helpfulGuidance =
+            `\n\nThe table or record was not found.\n` +
+            `  - Verify the table name using list_tables\n` +
+            `  - Verify the record ID using search or retrieve_record`;
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error updating record '${params.record_id}' in table '${params.table}':\n\n${errorDetails}${helpfulGuidance}`,
+            },
+          ],
+        };
+      }
+    }
+  );
 }

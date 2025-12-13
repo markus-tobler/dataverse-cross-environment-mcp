@@ -33,6 +33,7 @@ The server provides the following tools for interacting with Dataverse:
 Returns information about the authenticated user.
 
 **Returns:**
+
 - User ID (systemuser)
 - Business Unit ID
 - Organization ID
@@ -42,6 +43,7 @@ Returns information about the authenticated user.
 Lists all Dataverse tables accessible to the authenticated user.
 
 **Returns:**
+
 - Array of tables with:
   - Logical name (e.g., `account`, `contact`)
   - Display name (e.g., "Account", "Contact")
@@ -53,11 +55,13 @@ Lists all Dataverse tables accessible to the authenticated user.
 Searches for records across Dataverse tables using the Dataverse Search API.
 
 **Parameters:**
+
 - `searchTerm` (string, required): The term to search for
 - `tableFilter` (string, optional): Limit search to specific table (e.g., `account`)
 - `top` (number, optional): Maximum results to return (default: 10)
 
 **Returns:**
+
 - Array of matching records with basic information
 - Total record count
 - Deep links to records
@@ -67,11 +71,13 @@ Searches for records across Dataverse tables using the Dataverse Search API.
 Retrieves a single record with complete details.
 
 **Parameters:**
+
 - `tableName` (string, required): Logical name of the table (e.g., `account`)
 - `recordId` (string, required): GUID of the record or primary name value
 - `allColumns` (boolean, optional): Return all columns instead of important columns only
 
 **Returns:**
+
 - Full record with all requested attributes
 - Formatted values for lookups and option sets
 
@@ -80,23 +86,72 @@ Retrieves a single record with complete details.
 Gets detailed schema information for a Dataverse table.
 
 **Parameters:**
+
 - `tableName` (string, required): Logical name of the table
 - `full` (boolean, optional): Include all columns (default: false, returns important columns only)
 
 **Returns:**
+
 - Table metadata (logical name, display name, description)
 - Primary ID and name attributes
 - Column definitions with types and constraints
 - Sample record structure
+
+### create_record
+
+Creates a new record in a Dataverse table.
+
+**Parameters:**
+
+- `table` (string, required): The logical name of the table to create the record in.
+- `data` (object, required): A JSON object containing the data for the new record.
+
+**Data Conversion:**
+The tool automatically handles data conversion for the following types:
+
+- **Lookups**:
+  - GUID: `"lookup_attribute": "00000000-0000-0000-0000-000000000001"`
+  - Web API style: `"lookup_attribute@odata.bind": "/contacts(00000000-0000-0000-0000-000000000001)"`
+  - Primary name: `"lookup_attribute": "Contact Name"`
+- **Option Sets**:
+  - Integer value: `"optionset_attribute": 100000000`
+  - Label: `"optionset_attribute": "Option Label"`
+- **Transaction Currency**:
+  - If `transactioncurrencyid` is not provided, it defaults to the organization's base currency.
+
+**Returns:**
+
+- The ID of the newly created record.
+- A resource link to the new record.
+
+### update_record
+
+Updates an existing record in a Dataverse table.
+
+**Parameters:**
+
+- `table` (string, required): The logical name of the table to update the record in.
+- `record_id` (string, required): The ID of the record to update.
+- `data` (object, required): A JSON object containing the data to update on the record.
+
+**Data Conversion:**
+The tool automatically handles data conversion for the same types as `create_record`.
+
+**Returns:**
+
+- A success message.
+- A resource link to the updated record.
 
 ### get_predefined_queries
 
 Lists saved queries (views) available for a table.
 
 **Parameters:**
+
 - `tableName` (string, required): Logical name of the table
 
 **Returns:**
+
 - Array of system views (savedqueries) and personal views (userqueries)
 - Query IDs and names
 
@@ -105,10 +160,12 @@ Lists saved queries (views) available for a table.
 Executes a saved query by ID or name.
 
 **Parameters:**
+
 - `queryIdOrName` (string, required): Query GUID or name
 - `tableName` (string, optional): Table name when using query name instead of ID
 
 **Returns:**
+
 - Query results with all columns defined in the view
 - Deep links to records
 
@@ -117,10 +174,12 @@ Executes a saved query by ID or name.
 Executes a custom FetchXML query.
 
 **Parameters:**
+
 - `fetchXml` (string, required): FetchXML query string
 - `tableName` (string, optional): Table name if not specified in FetchXML
 
 **Returns:**
+
 - Query results
 - Deep links to records
 
@@ -163,6 +222,7 @@ Executes a custom FetchXML query.
 ### User Isolation
 
 The server implements strict user isolation for all operations:
+
 - Caches are segregated by user ID for user-specific data
 - Each request operates in the context of the authenticated user
 - No cross-user data leakage in multi-tenant deployments
@@ -181,7 +241,7 @@ The server uses a unified logging system with configurable log levels:
 Default log level is `INFO`. Debug logging can be enabled programmatically:
 
 ```typescript
-import { logger, LogLevel } from './utils/logger.js';
+import { logger, LogLevel } from "./utils/logger.js";
 
 // Enable debug logging
 logger.setLogLevel(LogLevel.DEBUG);
@@ -204,6 +264,7 @@ The server implements intelligent caching for metadata and user-specific data wi
 **User Isolation:**
 
 User-specific cache data (important columns and readable entity names) is isolated per user ID to ensure:
+
 - Each user sees only their authorized entities
 - Column recommendations are based on data the user can access
 - No data leakage between different users in multi-tenant scenarios
@@ -218,7 +279,7 @@ User-specific data: `${dataverseUrl}_${userId}_${tableName}_${cacheType}`
 Caches automatically expire based on TTL. Manual cache clearing:
 
 ```typescript
-import { MetadataService } from './services/dataverse/MetadataService.js';
+import { MetadataService } from "./services/dataverse/MetadataService.js";
 
 // Clear important columns and table descriptions cache
 MetadataService.clearImportantColumnsCache();
