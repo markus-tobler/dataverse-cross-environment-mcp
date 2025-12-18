@@ -33,6 +33,10 @@ param dataverseUrl string
 @description('Dataverse API Version (default: v9.2)')
 param dataverseApiVersion string = 'v9.2'
 
+@description('Log level for the application (DEBUG, INFO, WARN, ERROR)')
+@allowed(['DEBUG', 'INFO', 'WARN', 'ERROR'])
+param logLevel string = 'INFO'
+
 // Tags that should be applied to all resources.
 // 
 // Note that 'azd-service-name' tags should be applied separately to service host resources.
@@ -55,6 +59,7 @@ module resources 'resources.bicep' = {
     sessionSecret: sessionSecret
     dataverseUrl: dataverseUrl
     dataverseApiVersion: dataverseApiVersion
+    logLevel: logLevel
   }
 }
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = resources.outputs.AZURE_CONTAINER_REGISTRY_ENDPOINT

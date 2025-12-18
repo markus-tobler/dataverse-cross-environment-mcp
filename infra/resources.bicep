@@ -28,6 +28,10 @@ param dataverseApiVersion string = 'v9.2'
 @description('Skip automatic role assignments (use when you have Owner permissions and will configure manually)')
 param skipRoleAssignments bool = false
 
+@description('Log level for the application (DEBUG, INFO, WARN, ERROR)')
+@allowed(['DEBUG', 'INFO', 'WARN', 'ERROR'])
+param logLevel string = 'INFO'
+
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location)
 
@@ -51,6 +55,10 @@ var baseEnvVars = [
   {
     name: 'NODE_ENV'
     value: 'production'
+  }
+  {
+    name: 'LOG_LEVEL'
+    value: logLevel
   }
 ]
 

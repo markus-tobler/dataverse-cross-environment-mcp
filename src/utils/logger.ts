@@ -18,7 +18,26 @@ export enum LogLevel {
 
 class Logger {
   private mode: LogMode = LogMode.HTTP;
-  private logLevel: LogLevel = LogLevel.INFO;
+  private logLevel: LogLevel = this.getLogLevelFromEnv();
+
+  /**
+   * Get log level from environment variable
+   */
+  private getLogLevelFromEnv(): LogLevel {
+    const level = process.env.LOG_LEVEL?.toUpperCase();
+    switch (level) {
+      case "DEBUG":
+        return LogLevel.DEBUG;
+      case "INFO":
+        return LogLevel.INFO;
+      case "WARN":
+        return LogLevel.WARN;
+      case "ERROR":
+        return LogLevel.ERROR;
+      default:
+        return LogLevel.INFO;
+    }
+  }
 
   /**
    * Set the logging mode

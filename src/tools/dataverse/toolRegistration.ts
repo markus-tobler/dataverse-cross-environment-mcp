@@ -21,7 +21,28 @@ function formatRecordOperationError(
   operation: "create" | "update",
   params: { table: string; record_id?: string }
 ): string {
-  const errorDetails = error.message || "Unknown error occurred";
+  // Extract concise error message from verbose API responses
+  let errorDetails = error.message || "Unknown error occurred";
+
+  // For Dataverse API errors with verbose stack traces, extract just the key message
+  if (errorDetails.includes("Dataverse API request failed")) {
+    const match = errorDetails.match(/"message":"([^"]+)"/);
+    if (match && match[1]) {
+      errorDetails = match[1];
+      // Clean up common escape sequences and link references
+      errorDetails = errorDetails
+        .replace(/\\r\\n/g, " ")
+        .replace(/\s+/g, " ")
+        .replace(/For more information.*?--+>.*$/, "")
+        .replace(/InnerException\s*:\s*\S+\.\S+Exception:\s*/, "")
+        .trim();
+    } else {
+      // Fallback: Extract just the first line if it's a multi-line error
+      const lines = errorDetails.split("\n");
+      errorDetails = lines[0];
+    }
+  }
+
   let helpfulGuidance = "";
 
   // Lookup resolution errors
@@ -35,7 +56,7 @@ function formatRecordOperationError(
       `  - Web API style: "accounts(12345678-1234-1234-1234-123456789abc)"\n` +
       `  - Entity/GUID pair: "account=12345678-1234-1234-1234-123456789abc"\n` +
       `  - Primary name: "Contoso Ltd" (must be unique in the target table)\n\n` +
-      `Use describe_table to see which entity types this lookup can reference.`;
+      `Use describe_table_format to see which entity types this lookup can reference and get detailed examples.`;
   }
   // Option set resolution errors
   else if (errorDetails.includes("Could not resolve option set value")) {
@@ -46,7 +67,7 @@ function formatRecordOperationError(
       `Accepted formats:\n` +
       `  - Integer value: 1, 2, 727000000, etc.\n` +
       `  - Label name: "Active", "Inactive", etc. (must be unique)\n\n` +
-      `Use describe_table to see available options for this field.`;
+      `Use describe_table_format to see all available options with their integer values and labels.`;
   }
   // Multiple matches for lookups or option sets
   else if (
@@ -69,20 +90,25 @@ function formatRecordOperationError(
       `\n\nThe record with ID '${params.record_id}' was not found.\n` +
       `Verify the record ID using search or query tools.`;
   }
-  // Required field errors
+  // Required field errors - specific missing attributes validation
+  else if (errorDetails.includes("Missing required attributes")) {
+    // Our validation already provides detailed guidance, so just pass through
+    helpfulGuidance = "";
+  }
+  // Required field errors - generic
   else if (
     errorDetails.includes("required") ||
     errorDetails.includes("Required")
   ) {
     helpfulGuidance =
       `\n\nA required field is missing or invalid.\n` +
-      `Use describe_table to see which fields are required for this table.`;
+      `Use describe_table_format to see which fields are required and their exact format requirements.`;
   }
   // Data type errors
   else if (errorDetails.includes("type") || errorDetails.includes("invalid")) {
     helpfulGuidance =
       `\n\nData type mismatch detected.\n` +
-      `Use describe_table to see the expected data types and formats for each field.`;
+      `Use describe_table_format to see the expected data types, constraints, and format examples for each field.`;
   }
   // HTTP errors from Dataverse API
   else if (
@@ -92,7 +118,7 @@ function formatRecordOperationError(
     helpfulGuidance =
       `\n\nThe Dataverse API rejected the request.\n` +
       `Common causes:\n` +
-      `  - Invalid field names (use describe_table to verify)\n` +
+      `  - Invalid field names (use describe_table_format to verify)\n` +
       `  - Data type mismatches\n` +
       (operation === "update"
         ? `  - Attempting to update read-only fields\n`
@@ -690,6 +716,121 @@ export function registerDataverseTools(
   );
 
   server.registerTool(
+    "describe_table_format",
+    {
+      description:
+        "Get comprehensive format information for creating valid records in a Dataverse table. This tool is specifically designed for LLM agents and provides detailed metadata about field types, option sets (choices), boolean values, lookup targets, and constraints. Use this tool BEFORE attempting to create or update records to understand the exact format requirements and valid values for each field. The response includes detailed guidance on how to format lookups, option sets, booleans, and other field types, along with multiple example values for each field.",
+      inputSchema: {
+        tableName: z
+          .string()
+          .describe(
+            "The logical name or entity set name of the table (e.g., 'account', 'contact', 'accounts')"
+          ),
+      },
+    },
+    async (params: { tableName: string }) => {
+      try {
+        const userInfo = contextProvider.getUserInfo();
+        logger.info(
+          `Executing DescribeTableFormat tool for user ${userInfo} - Table: ${params.tableName}`
+        );
+
+        const req = contextProvider.getContext();
+        const logicalName = await dataverseClient.resolveLogicalName(
+          params.tableName,
+          req
+        );
+        const formatDescription = await dataverseClient.describeTableFormat(
+          logicalName,
+          req
+        );
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  table: {
+                    logical_name: formatDescription.logicalName,
+                    display_name: formatDescription.displayName,
+                    description: formatDescription.description,
+                    primary_id_attribute: formatDescription.primaryIdAttribute,
+                    primary_name_attribute:
+                      formatDescription.primaryNameAttribute,
+                  },
+                  required_attributes: formatDescription.requiredAttributes,
+                  creation_guidance: formatDescription.creationGuidance,
+                  attributes: formatDescription.attributes.map((attr) => ({
+                    logical_name: attr.logicalName,
+                    display_name: attr.displayName,
+                    description: attr.description,
+                    type: attr.type,
+                    is_primary_id: attr.isPrimaryId,
+                    is_primary_name: attr.isPrimaryName,
+                    is_required: attr.isRequired,
+                    is_read_only: attr.isReadOnly,
+                    is_valid_for_create: attr.isValidForCreate,
+                    is_valid_for_update: attr.isValidForUpdate,
+                    max_length: attr.maxLength,
+                    min_value: attr.minValue,
+                    max_value: attr.maxValue,
+                    precision: attr.precision,
+                    format: attr.format,
+                    option_set: attr.optionSet,
+                    boolean_options: attr.booleanOptions,
+                    lookup_targets: attr.lookupTargets,
+                    format_guidance: attr.formatGuidance,
+                    example_values: attr.exampleValues,
+                  })),
+                  attribute_count: formatDescription.attributes.length,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error: any) {
+        logger.error("Error executing DescribeTableFormat tool:", error);
+
+        const errorMessage =
+          error.name === "Error" &&
+          error.message.includes("Configuration error")
+            ? `Configuration error: ${error.message}. Please verify that the Dataverse instance URL is correctly configured.`
+            : error.name === "Error" &&
+              error.message.includes("Authentication error")
+            ? `Authentication error: ${error.message}. The current user may not have permission to access table metadata.`
+            : error.message?.includes("does not exist") ||
+              error.message?.includes("not found")
+            ? `Table '${params.tableName}' not found. Use the 'list_tables' tool to see available tables.`
+            : `Unexpected error while describing table format: ${error.message}. Please check the server logs for more details.`;
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  error: true,
+                  error_type: error.name,
+                  message: errorMessage,
+                  details: error.message,
+                  table_name: params.tableName,
+                  suggestion:
+                    "Use the 'list_tables' tool to verify the table name exists, or check if you have permissions to access this table.",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
     "get_predefined_queries",
     {
       description:
@@ -1029,7 +1170,7 @@ export function registerDataverseTools(
     "create_record",
     {
       description:
-        "Create a new record in a Dataverse table. It is recommended to use describe_table first to understand the structure of the record.",
+        "Create a new record in a Dataverse table. IMPORTANT: Use describe_table_format first to understand the exact format requirements for each field including valid option set values, lookup targets, and data type constraints. This will ensure you provide correctly formatted data.",
       inputSchema: z.object({
         table: z
           .string()
@@ -1084,7 +1225,7 @@ export function registerDataverseTools(
     "update_record",
     {
       description:
-        "Update an existing record in a Dataverse table. It is recommended to use describe_table first to understand the structure of the record.",
+        "Update an existing record in a Dataverse table. IMPORTANT: Use describe_table_format first to understand the exact format requirements for each field including valid option set values, lookup targets, and data type constraints. This will ensure you provide correctly formatted data.",
       inputSchema: z.object({
         table: z
           .string()

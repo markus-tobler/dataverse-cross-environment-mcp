@@ -234,20 +234,32 @@ export class InteractiveAuthProvider {
     if (accounts.length > 0) {
       // Use the first account (or filter by username if provided)
       if (this.params.username) {
+        // Only use cached account if it matches the specified username
         this.account =
           accounts.find(
             (acc) =>
               acc.username.toLowerCase() === this.params.username!.toLowerCase()
-          ) || accounts[0];
+          ) || null;
+
+        if (this.account) {
+          logger.info(
+            `Found cached account: ${
+              this.account.username || this.account.name || "Unknown"
+            }`
+          );
+        } else {
+          logger.info(
+            `No cached account found for ${this.params.username}, will prompt for authentication`
+          );
+        }
       } else {
         this.account = accounts[0];
+        logger.info(
+          `Found cached account: ${
+            this.account.username || this.account.name || "Unknown"
+          }`
+        );
       }
-
-      logger.info(
-        `Found cached account: ${
-          this.account.username || this.account.name || "Unknown"
-        }`
-      );
     }
   }
 }

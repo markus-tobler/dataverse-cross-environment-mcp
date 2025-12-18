@@ -23,11 +23,24 @@ export class DataMutationService {
     tableName: string,
     data: Record<string, any>
   ): Promise<string> {
+    logger.debug(
+      `CreateRecord called for table '${tableName}' with data:`,
+      JSON.stringify(data, null, 2)
+    );
+    logger.debug(`Data keys provided: ${Object.keys(data).join(", ")}`);
+
+    // Validate that all required attributes are provided
+    await this.validateRequiredAttributes(service, tableName, data);
+
     const entitySetName = await this.metadataService.getEntitySetName(
       service,
       tableName
     );
     const processedData = await this.processPayload(service, tableName, data);
+    logger.debug(
+      `Processed payload for table '${tableName}':`,
+      JSON.stringify(processedData, null, 2)
+    );
     const response = await service.createRecord(entitySetName, processedData);
 
     if (response.ok) {
@@ -39,6 +52,127 @@ export class DataMutationService {
     }
 
     throw new Error(`Failed to create record: ${await response.text()}`);
+  }
+
+  /**
+   * Validates that all required attributes are provided in the data object
+   * @param service - The Dataverse Web API service
+   * @param tableName - The logical name of the table
+   * @param data - The data object to validate
+   * @throws Error if any required attributes are missing
+   */
+  private async validateRequiredAttributes(
+    service: DataverseWebApiService,
+    tableName: string,
+    data: Record<string, any>
+  ): Promise<void> {
+    logger.debug(`Validating required attributes for table '${tableName}'`);
+
+    const tableDescription = await this.metadataService.describeTable(
+      service,
+      tableName,
+      true // Get full metadata to ensure we have all required fields
+    );
+
+    const missingRequiredFields: string[] = [];
+
+    // Fields that are system-managed and should not be validated as required
+    const systemManagedFields = [
+      "statecode",
+      "statuscode",
+      "ownerid",
+      "owneridtype",
+      "transactioncurrencyid",
+      "createdby",
+      "createdon",
+      "modifiedby",
+      "modifiedon",
+      "versionnumber",
+    ];
+
+    logger.debug(
+      `System-managed fields that will be skipped: ${systemManagedFields.join(
+        ", "
+      )}`
+    );
+
+    const requiredFields = tableDescription.attributes.filter(
+      (attr) =>
+        attr.isRequired &&
+        !attr.isReadOnly &&
+        attr.logicalName !== tableDescription.primaryIdAttribute
+    );
+
+    logger.debug(
+      `Found ${requiredFields.length} required fields: ${requiredFields
+        .map((f) => f.logicalName)
+        .join(", ")}`
+    );
+
+    for (const attribute of tableDescription.attributes) {
+      // Check if the attribute is required for create operations
+      if (
+        attribute.isRequired &&
+        !attribute.isReadOnly &&
+        attribute.logicalName !== tableDescription.primaryIdAttribute
+      ) {
+        // Skip system-managed fields that Dataverse handles automatically
+        if (systemManagedFields.includes(attribute.logicalName)) {
+          logger.debug(
+            `Skipping system-managed field: ${attribute.logicalName}`
+          );
+          continue;
+        }
+
+        // Check if the field is provided in the data
+        const isProvided = data.hasOwnProperty(attribute.logicalName);
+
+        // Special handling for lookup fields (they might use @odata.bind suffix)
+        const isLookupProvided =
+          (attribute.type === "Lookup" ||
+            attribute.type === "Customer" ||
+            attribute.type === "Owner") &&
+          data.hasOwnProperty(`${attribute.logicalName}@odata.bind`);
+
+        logger.debug(
+          `Checking required field '${attribute.logicalName}' (${attribute.type}): isProvided=${isProvided}, isLookupProvided=${isLookupProvided}`
+        );
+
+        if (!isProvided && !isLookupProvided) {
+          logger.debug(`Required field '${attribute.logicalName}' is MISSING`);
+          missingRequiredFields.push(
+            `${attribute.logicalName} (${attribute.displayName})`
+          );
+        } else {
+          logger.debug(
+            `Required field '${
+              attribute.logicalName
+            }' is provided with value: ${JSON.stringify(
+              data[attribute.logicalName] ||
+                data[`${attribute.logicalName}@odata.bind`]
+            )}`
+          );
+        }
+      }
+    }
+
+    if (missingRequiredFields.length > 0) {
+      const fieldList = missingRequiredFields
+        .map((field) => `  - ${field}`)
+        .join("\n");
+
+      logger.error(
+        `Validation failed for table '${tableName}': Missing ${missingRequiredFields.length} required field(s)`
+      );
+
+      throw new Error(
+        `Cannot create record in table '${tableName}': Missing required attributes:\n${fieldList}\n\nUse describe_table to see all required fields and their data types.`
+      );
+    }
+
+    logger.debug(
+      `Validation successful for table '${tableName}' - all required fields provided`
+    );
   }
 
   async updateRecord(
@@ -81,18 +215,23 @@ export class DataMutationService {
     );
     const processedData: Record<string, any> = {};
 
-    for (const key in data) {
-      if (Object.prototype.hasOwnProperty.call(data, key)) {
+    // Pre-process: Handle special patterns like ownerid + owneridtype
+    const normalizedData = this.normalizeSpecialPatterns(data);
+
+    for (const key in normalizedData) {
+      if (Object.prototype.hasOwnProperty.call(normalizedData, key)) {
         const attribute = tableDescription.attributes.find(
           (attr) => attr.logicalName === key
         );
         if (attribute) {
-          const value = data[key];
+          const value = normalizedData[key];
           // Data conversion logic
+          // Use AttributeTypeName.Value (recommended) which returns values like "LookupType", "CustomerType", "OwnerType"
+          // Reference: https://learn.microsoft.com/en-us/dotnet/api/microsoft.xrm.sdk.metadata.attributemetadata.attributetypename
           if (
-            attribute.type === "Lookup" ||
-            attribute.type === "Customer" ||
-            attribute.type === "Owner"
+            attribute.type === "LookupType" ||
+            attribute.type === "CustomerType" ||
+            attribute.type === "OwnerType"
           ) {
             processedData[`${key}@odata.bind`] = await this.resolveLookup(
               service,
@@ -100,9 +239,9 @@ export class DataMutationService {
               value
             );
           } else if (
-            attribute.type === "Picklist" ||
-            attribute.type === "State" ||
-            attribute.type === "Status"
+            attribute.type === "PicklistType" ||
+            attribute.type === "StateType" ||
+            attribute.type === "StatusType"
           ) {
             processedData[key] = await this.resolveOptionSet(attribute, value);
           } else {
@@ -110,7 +249,7 @@ export class DataMutationService {
           }
         } else {
           // Handle unknown attributes if necessary
-          processedData[key] = data[key];
+          processedData[key] = normalizedData[key];
         }
       }
     }
@@ -235,5 +374,86 @@ export class DataMutationService {
     throw new Error(
       `Could not resolve option set value for attribute ${attribute.logicalName}`
     );
+  }
+
+  /**
+   * Normalizes special input patterns that clients might use
+   * For example: ownerid + owneridtype -> ownerid with entity type prefix
+   */
+  private normalizeSpecialPatterns(
+    data: Record<string, any>
+  ): Record<string, any> {
+    const normalized: Record<string, any> = { ...data };
+
+    // Handle pattern: ownerid + owneridtype
+    // Client provides: { "ownerid": "guid", "owneridtype": "systemuser" }
+    // Convert to: { "ownerid": "systemuser=guid" }
+    if (normalized.ownerid && normalized.owneridtype) {
+      const ownerGuid = normalized.ownerid;
+      const ownerType = normalized.owneridtype;
+
+      // Convert to entity=guid format which resolveLookup can handle
+      normalized.ownerid = `${ownerType}=${ownerGuid}`;
+
+      // Remove the type field as it's been merged
+      delete normalized.owneridtype;
+
+      logger.debug(
+        `Normalized ownerid pattern: ownerid="${ownerGuid}", owneridtype="${ownerType}" -> ownerid="${normalized.ownerid}"`
+      );
+    }
+
+    // Handle pattern: regardingobjectid + regardingobjecttypecode (similar polymorphic lookup)
+    if (normalized.regardingobjectid && normalized.regardingobjecttypecode) {
+      const regardingGuid = normalized.regardingobjectid;
+      const regardingType = normalized.regardingobjecttypecode;
+
+      normalized.regardingobjectid = `${regardingType}=${regardingGuid}`;
+      delete normalized.regardingobjecttypecode;
+
+      logger.debug(
+        `Normalized regardingobjectid pattern: regardingobjectid="${regardingGuid}", regardingobjecttypecode="${regardingType}" -> regardingobjectid="${normalized.regardingobjectid}"`
+      );
+    }
+
+    // Handle any other *id + *type or *id + *typecode patterns
+    const typePatterns = [
+      { idSuffix: "id", typeSuffix: "type" },
+      { idSuffix: "id", typeSuffix: "typecode" },
+      { idSuffix: "objectid", typeSuffix: "objecttypecode" },
+    ];
+
+    for (const key in normalized) {
+      for (const pattern of typePatterns) {
+        // Check if this key ends with the type suffix
+        if (key.endsWith(pattern.typeSuffix)) {
+          // Derive the corresponding ID field name
+          const baseFieldName = key.substring(
+            0,
+            key.length - pattern.typeSuffix.length
+          );
+          const idFieldName = baseFieldName + pattern.idSuffix;
+
+          // If both the ID and type fields exist, merge them
+          if (
+            normalized[idFieldName] &&
+            !idFieldName.includes("owner") &&
+            !idFieldName.includes("regarding")
+          ) {
+            const idValue = normalized[idFieldName];
+            const typeValue = normalized[key];
+
+            normalized[idFieldName] = `${typeValue}=${idValue}`;
+            delete normalized[key];
+
+            logger.debug(
+              `Normalized polymorphic lookup pattern: ${idFieldName}="${idValue}", ${key}="${typeValue}" -> ${idFieldName}="${normalized[idFieldName]}"`
+            );
+          }
+        }
+      }
+    }
+
+    return normalized;
   }
 }

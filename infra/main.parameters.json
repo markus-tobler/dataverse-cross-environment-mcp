@@ -31,6 +31,9 @@
     },
     "dataverseApiVersion": {
       "value": "${DATAVERSE_API_VERSION=v9.2}"
+    },
+    "logLevel": {
+      "value": "${LOG_LEVEL=INFO}"
     }
   }
 }

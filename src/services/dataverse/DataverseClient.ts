@@ -4,6 +4,7 @@ import {
   TableDescription,
   TableMetadata,
   WhoAmIResponse,
+  TableFormatDescription,
 } from "../../types/dataverse.js";
 import { ConnectionStringParams } from "../../utils/connectionStringParser.js";
 import { AuthService } from "./AuthService.js";
@@ -92,6 +93,14 @@ export class DataverseClient {
   ): Promise<TableDescription> {
     const service = await this.createDataverseService(req);
     return this.metadataService.describeTable(service, tableName, full);
+  }
+
+  async describeTableFormat(
+    tableName: string,
+    req?: Request
+  ): Promise<TableFormatDescription> {
+    const service = await this.createDataverseService(req);
+    return this.metadataService.describeTableFormat(service, tableName);
   }
 
   async resolveLogicalName(tableName: string, req?: Request): Promise<string> {
