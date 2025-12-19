@@ -25,6 +25,9 @@ param dataverseUrl string
 @description('Dataverse API Version (default: v9.2)')
 param dataverseApiVersion string = 'v9.2'
 
+@description('Skip automatic role assignments (use when you have Owner permissions and will configure manually)')
+param skipRoleAssignments bool = false
+
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location)
 
@@ -107,7 +110,7 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.1.1' =
     location: location
     tags: tags
     publicNetworkAccess: 'Enabled'
-    roleAssignments: [
+    roleAssignments: skipRoleAssignments ? [] : [
       {
         principalId: dataverseMcpIdentity.outputs.principalId
         principalType: 'ServicePrincipal'

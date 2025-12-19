@@ -1,4 +1,4 @@
-targetScope = 'subscription'
+targetScope = 'resourceGroup'
 
 @minLength(1)
 @maxLength(64)
@@ -7,9 +7,12 @@ param environmentName string
 
 @minLength(1)
 @description('Primary location for all resources')
-param location string
+param location string = resourceGroup().location
 
 param dataverseMcpExists bool
+
+@description('Skip automatic role assignments (use when you have Owner permissions and will configure manually)')
+param skipRoleAssignments bool = false
 
 @description('Id of the user or app to assign application roles')
 param principalId string
@@ -39,21 +42,14 @@ var tags = {
   'azd-env-name': environmentName
 }
 
-// Organize resources in a resource group
-resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
-  name: 'rg-${environmentName}'
-  location: location
-  tags: tags
-}
-
 module resources 'resources.bicep' = {
-  scope: rg
   name: 'resources'
   params: {
     location: location
     tags: tags
     principalId: principalId
     dataverseMcpExists: dataverseMcpExists
+    skipRoleAssignments: skipRoleAssignments
     azureAdTenantId: azureAdTenantId
     azureAdClientId: azureAdClientId
     sessionSecret: sessionSecret
