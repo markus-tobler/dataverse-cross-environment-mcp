@@ -1,6 +1,7 @@
 # Deploying with Skip Role Assignments
 
 If you're deploying to an existing resource group where:
+
 - ✅ Resource providers are already registered on the subscription
 - ✅ You have **Owner** role on the resource group
 - ❌ You're still getting role assignment errors during deployment
@@ -10,6 +11,7 @@ You can skip automatic role assignments and configure them manually after deploy
 ## Why This Helps
 
 The Bicep deployment tries to automatically assign the **AcrPull** role to the Container App's managed identity so it can pull images from Azure Container Registry. Even with Owner permissions, this can sometimes fail due to:
+
 - Azure Policy restrictions
 - Custom RBAC configurations
 - Timing issues with Azure Resource Manager
@@ -196,10 +198,13 @@ az containerapp update `
 ## Troubleshooting
 
 ### "The role assignment already exists"
+
 This is fine - it means the role was already assigned. Continue with the deployment.
 
 ### Container App fails to pull image
+
 Check the logs:
+
 ```powershell
 az containerapp logs show `
   --resource-group $RESOURCE_GROUP `
@@ -210,6 +215,7 @@ az containerapp logs show `
 If you see "unauthorized: authentication required", the role assignment hasn't propagated yet. Wait 1-2 minutes and restart the container app.
 
 ### Check Current Role Assignments
+
 ```powershell
 # On the managed identity
 az role assignment list --assignee $IDENTITY_PRINCIPAL_ID --output table
@@ -223,12 +229,14 @@ az role assignment list `
 ## When to Use This Approach
 
 ✅ Use skip role assignments when:
+
 - You have Owner permissions on the resource group
 - Automatic role assignments fail with authorization errors
 - Your organization has custom RBAC policies
 - You prefer explicit control over role assignments
 
 ❌ Don't use skip role assignments if:
+
 - You have automated CI/CD pipelines (role assignments should be in IaC)
 - You don't have permissions to create role assignments manually
 - You're deploying to multiple environments (automation is better)

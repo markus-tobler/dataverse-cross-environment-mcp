@@ -360,6 +360,59 @@ az role assignment create `
 
 **Solution**: Resource providers need to be registered (see Step 1.3)
 
+### Common Error: "ResourceDeploymentFailure" or Resources in Failed State
+
+If a deployment times out or fails, resources may be left in a failed state. Clean them up before retrying:
+
+```powershell
+# Delete failed container app
+az containerapp delete --resource-group $RESOURCE_GROUP --name dataverse-mcp --yes 2>$null
+
+# Delete failed deployments
+az deployment group delete --resource-group $RESOURCE_GROUP --name dataverse-mcp-fetch-image 2>$null
+az deployment group delete --resource-group $RESOURCE_GROUP --name dataverseMcp 2>$null
+az deployment group delete --resource-group $RESOURCE_GROUP --name resources 2>$null
+
+# If using azd, reset the resource exists flag
+azd env set SERVICE_DATAVERSE_MCP_RESOURCE_EXISTS false
+
+# Clear any cached deployment state
+Remove-Item .azure\*\*.env.backup -Force -ErrorAction SilentlyContinue
+
+# Retry the deployment
+azd up
+```
+
+Or delete all resources and start completely fresh:
+
+```powershell
+# List all resources to verify before deleting
+az resource list --resource-group $RESOURCE_GROUP --output table
+
+# Delete all resources (WARNING: This deletes everything in the resource group)
+az resource list --resource-group $RESOURCE_GROUP --query "[].id" -o tsv | ForEach-Object {
+    az resource delete --ids $_ --verbose
+}
+```
+
+### Deployment Name in Section 2.4
+
+The deployment name in step 2.4 should be `main` by default. If it's different, check with:
+
+```powershell
+# List all deployments to find the correct name
+az deployment group list --resource-group $RESOURCE_GROUP --output table
+
+# Use the most recent deployment name
+$DEPLOYMENT_NAME = az deployment group list --resource-group $RESOURCE_GROUP --query "[0].name" -o tsv
+
+# Get outputs using the correct deployment name
+$ACR_NAME = az deployment group show `
+  --resource-group $RESOURCE_GROUP `
+  --name $DEPLOYMENT_NAME `
+  --query "properties.outputs.AZURE_CONTAINER_REGISTRY_ENDPOINT.value" -o tsv
+```
+
 ---
 
 ## Clean Up

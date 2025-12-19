@@ -110,16 +110,18 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.1.1' =
     location: location
     tags: tags
     publicNetworkAccess: 'Enabled'
-    roleAssignments: skipRoleAssignments ? [] : [
-      {
-        principalId: dataverseMcpIdentity.outputs.principalId
-        principalType: 'ServicePrincipal'
-        roleDefinitionIdOrName: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-        )
-      }
-    ]
+    roleAssignments: skipRoleAssignments
+      ? []
+      : [
+          {
+            principalId: dataverseMcpIdentity.outputs.principalId
+            principalType: 'ServicePrincipal'
+            roleDefinitionIdOrName: subscriptionResourceId(
+              'Microsoft.Authorization/roleDefinitions',
+              '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+            )
+          }
+        ]
   }
 }
 
