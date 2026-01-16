@@ -315,7 +315,7 @@ export function registerDataverseTools(
           .union([z.string(), z.array(z.string())])
           .optional()
           .describe(
-            "Optional: Logical name(s) of specific table(s) to search within (e.g., 'account' or ['account', 'contact']). If not provided, searches across all enabled tables. When specified, returns only important columns for better performance."
+            "Optional: Table name(s) to search within - can be logical name (e.g., 'salesorder') or entity set name (e.g., 'salesorders'). Accepts a single table name or an array like ['account', 'contact']. If not provided, searches across all enabled tables. When specified, returns only important columns for better performance."
           ),
         top: z
           .number()
@@ -469,12 +469,9 @@ export function registerDataverseTools(
         );
 
         const req = contextProvider.getContext();
-        const logicalName = await dataverseClient.resolveLogicalName(
-          params.tableName,
-          req
-        );
+        // DataverseClient.retrieveRecord now handles resolution internally
         const record = await dataverseClient.retrieveRecord(
-          logicalName,
+          params.tableName,
           params.recordId,
           req,
           params.allColumns || false
@@ -630,12 +627,9 @@ export function registerDataverseTools(
         );
 
         const req = contextProvider.getContext();
-        const logicalName = await dataverseClient.resolveLogicalName(
-          params.tableName,
-          req
-        );
+        // DataverseClient.describeTable now handles resolution internally
         const description = await dataverseClient.describeTable(
-          logicalName,
+          params.tableName,
           params.full || false,
           req
         );
@@ -736,12 +730,9 @@ export function registerDataverseTools(
         );
 
         const req = contextProvider.getContext();
-        const logicalName = await dataverseClient.resolveLogicalName(
-          params.tableName,
-          req
-        );
+        // DataverseClient.describeTableFormat now handles resolution internally
         const formatDescription = await dataverseClient.describeTableFormat(
-          logicalName,
+          params.tableName,
           req
         );
 
@@ -950,42 +941,27 @@ export function registerDataverseTools(
           req
         );
 
-        const content: any[] = [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                query: params.queryIdOrName,
-                table_name: result.tableName,
-                total_record_count: result.totalRecordCount,
-                records: result.records.map((r) => ({
-                  record_id: r.recordId,
-                  deep_link: r.deepLink,
-                  attributes: r.attributes,
-                })),
-              },
-              null,
-              2
-            ),
-          },
-        ];
-
-        // Add resource links for each record
-        result.records.forEach((r) => {
-          content.push({
-            type: "resource_link",
-            uri: `dataverse:///${result.tableName}/${r.recordId}`,
-            name: r.recordId,
-            description: `${result.tableName} record`,
-            mimeType: "application/json",
-            annotations: {
-              audience: ["assistant"],
-              priority: 0.8,
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  query: params.queryIdOrName,
+                  table_name: result.tableName,
+                  total_record_count: result.totalRecordCount,
+                  records: result.records.map((r) => ({
+                    record_id: r.recordId,
+                    deep_link: r.deepLink,
+                    attributes: r.attributes,
+                  })),
+                },
+                null,
+                2
+              ),
             },
-          });
-        });
-
-        return { content };
+          ],
+        };
       } catch (error: any) {
         logger.error("Error executing RunPredefinedQuery tool:", error);
 
@@ -1066,41 +1042,26 @@ export function registerDataverseTools(
           req
         );
 
-        const content: any[] = [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                table_name: result.tableName,
-                total_record_count: result.totalRecordCount,
-                records: result.records.map((r) => ({
-                  record_id: r.recordId,
-                  deep_link: r.deepLink,
-                  attributes: r.attributes,
-                })),
-              },
-              null,
-              2
-            ),
-          },
-        ];
-
-        // Add resource links for each record
-        result.records.forEach((r) => {
-          content.push({
-            type: "resource_link",
-            uri: `dataverse:///${result.tableName}/${r.recordId}`,
-            name: r.recordId,
-            description: `${result.tableName} record`,
-            mimeType: "application/json",
-            annotations: {
-              audience: ["assistant"],
-              priority: 0.8,
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  table_name: result.tableName,
+                  total_record_count: result.totalRecordCount,
+                  records: result.records.map((r) => ({
+                    record_id: r.recordId,
+                    deep_link: r.deepLink,
+                    attributes: r.attributes,
+                  })),
+                },
+                null,
+                2
+              ),
             },
-          });
-        });
-
-        return { content };
+          ],
+        };
       } catch (error: any) {
         logger.error("Error executing RunCustomQuery tool:", error);
 

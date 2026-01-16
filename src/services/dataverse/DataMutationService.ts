@@ -18,27 +18,34 @@ export class DataMutationService {
     this.metadataService = metadataService;
   }
 
+  /**
+   * Create a new record in a Dataverse table
+   * @param service - The Dataverse Web API service
+   * @param logicalName - The logical name of the table (e.g., 'salesorder', NOT 'salesorders')
+   * @param data - The data for the new record
+   * @returns The ID of the created record
+   */
   async createRecord(
     service: DataverseWebApiService,
-    tableName: string,
+    logicalName: string,
     data: Record<string, any>
   ): Promise<string> {
     logger.debug(
-      `CreateRecord called for table '${tableName}' with data:`,
+      `CreateRecord called for table '${logicalName}' with data:`,
       JSON.stringify(data, null, 2)
     );
     logger.debug(`Data keys provided: ${Object.keys(data).join(", ")}`);
 
     // Validate that all required attributes are provided
-    await this.validateRequiredAttributes(service, tableName, data);
+    await this.validateRequiredAttributes(service, logicalName, data);
 
     const entitySetName = await this.metadataService.getEntitySetName(
       service,
-      tableName
+      logicalName
     );
-    const processedData = await this.processPayload(service, tableName, data);
+    const processedData = await this.processPayload(service, logicalName, data);
     logger.debug(
-      `Processed payload for table '${tableName}':`,
+      `Processed payload for table '${logicalName}':`,
       JSON.stringify(processedData, null, 2)
     );
     const response = await service.createRecord(entitySetName, processedData);
@@ -175,19 +182,26 @@ export class DataMutationService {
     );
   }
 
+  /**
+   * Update an existing record in a Dataverse table
+   * @param service - The Dataverse Web API service
+   * @param logicalName - The logical name of the table (e.g., 'salesorder', NOT 'salesorders')
+   * @param recordId - The ID of the record to update
+   * @param data - The data to update on the record
+   */
   async updateRecord(
     service: DataverseWebApiService,
-    tableName: string,
+    logicalName: string,
     recordId: string,
     data: Record<string, any>
   ): Promise<void> {
     const entitySetName = await this.metadataService.getEntitySetName(
       service,
-      tableName
+      logicalName
     );
     const processedData = await this.processPayload(
       service,
-      tableName,
+      logicalName,
       data,
       recordId
     );

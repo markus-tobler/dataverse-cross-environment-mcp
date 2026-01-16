@@ -31,6 +31,14 @@ export class DataQueryService {
     return `${orgUrl}/main.aspx?etn=${tableName}&pagetype=entityrecord&id=${recordId}`;
   }
 
+  /**
+   * Search for records using Dataverse Search API
+   * @param service - The Dataverse Web API service
+   * @param searchTerm - The text to search for
+   * @param tableFilter - Optional table name(s) to filter search. Accepts logical names or entity set names (resolved internally)
+   * @param top - Maximum number of results to return
+   * @note This method handles resolution internally because tableFilter can be an array
+   */
   async search(
     service: DataverseWebApiService,
     searchTerm: string,
@@ -46,14 +54,20 @@ export class DataQueryService {
       const searchEntities = [];
 
       for (const table of tables) {
+        // Resolve logical name first (handles both logical names and entity set names)
+        const logicalName = await this.metadataService.resolveLogicalName(
+          service,
+          table
+        );
+
         const importantColumns =
           await this.metadataService.getImportantColumnsForTable(
             service,
-            table
+            logicalName
           );
 
         const searchEntity: any = {
-          name: table,
+          name: logicalName,
           selectcolumns: importantColumns.length > 0 ? importantColumns : null,
           searchcolumns: null,
           filter: null,
@@ -141,16 +155,19 @@ export class DataQueryService {
     }
   }
 
+  /**
+   * Retrieve a single record from a Dataverse table
+   * @param service - The Dataverse Web API service
+   * @param logicalName - The logical name of the table (e.g., 'salesorder', NOT 'salesorders')
+   * @param recordId - The ID of the record to retrieve
+   * @param allColumns - If true, return all columns; otherwise return only important columns
+   */
   async retrieveRecord(
     service: DataverseWebApiService,
-    tableName: string,
+    logicalName: string,
     recordId: string,
     allColumns: boolean = false
   ): Promise<Record<string, any>> {
-    const logicalName = await this.metadataService.resolveLogicalName(
-      service,
-      tableName
-    );
     const accessToken = await service.getAccessTokenFunc()();
 
     try {

@@ -78,9 +78,14 @@ export class DataverseClient {
     allColumns: boolean = false
   ): Promise<Record<string, any>> {
     const service = await this.createDataverseService(req);
+    // Resolve to logical name (service methods require LogicalName)
+    const logicalName = await this.metadataService.resolveLogicalName(
+      service,
+      tableName
+    );
     return this.dataService.retrieveRecord(
       service,
-      tableName,
+      logicalName,
       recordId,
       allColumns
     );
@@ -92,7 +97,12 @@ export class DataverseClient {
     req?: Request
   ): Promise<TableDescription> {
     const service = await this.createDataverseService(req);
-    return this.metadataService.describeTable(service, tableName, full);
+    // Resolve to logical name (EntityDefinitions API requires LogicalName)
+    const logicalName = await this.metadataService.resolveLogicalName(
+      service,
+      tableName
+    );
+    return this.metadataService.describeTable(service, logicalName, full);
   }
 
   async describeTableFormat(
@@ -100,7 +110,12 @@ export class DataverseClient {
     req?: Request
   ): Promise<TableFormatDescription> {
     const service = await this.createDataverseService(req);
-    return this.metadataService.describeTableFormat(service, tableName);
+    // Resolve to logical name (EntityDefinitions API requires LogicalName)
+    const logicalName = await this.metadataService.resolveLogicalName(
+      service,
+      tableName
+    );
+    return this.metadataService.describeTableFormat(service, logicalName);
   }
 
   async resolveLogicalName(tableName: string, req?: Request): Promise<string> {
@@ -144,7 +159,12 @@ export class DataverseClient {
     req?: Request
   ): Promise<string> {
     const service = await this.createDataverseService(req);
-    return this.dataService.createRecord(service, tableName, data);
+    // Resolve to logical name (service methods require LogicalName)
+    const logicalName = await this.metadataService.resolveLogicalName(
+      service,
+      tableName
+    );
+    return this.dataService.createRecord(service, logicalName, data);
   }
 
   async updateRecord(
@@ -154,6 +174,11 @@ export class DataverseClient {
     req?: Request
   ): Promise<void> {
     const service = await this.createDataverseService(req);
-    return this.dataService.updateRecord(service, tableName, recordId, data);
+    // Resolve to logical name (service methods require LogicalName)
+    const logicalName = await this.metadataService.resolveLogicalName(
+      service,
+      tableName
+    );
+    return this.dataService.updateRecord(service, logicalName, recordId, data);
   }
 }

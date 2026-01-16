@@ -9,6 +9,216 @@ A Model Context Protocol (MCP) server that provides secure access to Microsoft D
 
 For step-by-step installation and registration instructions, see the **[Installation Guide](./INSTALLATION_GUIDE.md)**.
 
+## Local Development
+
+### Prerequisites
+
+- **Node.js**: Version 18 or higher
+- **npm**: Version 8 or higher
+- **Visual Studio Code**: Latest version recommended
+- **Dataverse Environment**: Access to a Microsoft Dataverse environment
+- **Entra ID App Registration**: Create an app registration with:
+  - Delegated permission: `Dynamics CRM` > `user_impersonation`
+  - Redirect URI: `http://localhost` (Public client/native)
+
+### Setup
+
+1. **Clone the repository**:
+
+   ```bash
+   git clone <repository-url>
+   cd dataverse-cross-environment-mcp
+   ```
+
+2. **Install dependencies**:
+
+   ```bash
+   npm install
+   ```
+
+3. **Build the project**:
+
+   ```bash
+   npm run build
+   ```
+
+### Running in VS Code
+
+#### STDIO Mode (Recommended for local development)
+
+STDIO mode uses interactive OAuth authentication and requires a Dataverse connection string.
+
+**Connection String Format:**
+
+```
+AuthType=OAuth;Url=<dataverse-url>;ClientId=<app-client-id>;RedirectUri=http://localhost;LoginPrompt=Auto
+```
+
+Optional: Add `Username=user@domain.com` to pre-fill the login prompt.
+
+**Option 1: Using command line**
+
+```bash
+node dist/index.js --connection-string="AuthType=OAuth;Url=https://yourorg.crm.dynamics.com;ClientId=your-client-id;RedirectUri=http://localhost;LoginPrompt=Auto"
+```
+
+**Option 2: Using npx (recommended for quick testing)**
+
+```bash
+npx dataverse-mcp-server --connection-string="AuthType=OAuth;Url=https://yourorg.crm.dynamics.com;ClientId=your-client-id;RedirectUri=http://localhost;LoginPrompt=Auto"
+```
+
+**Option 3: Using VS Code debugger**
+
+1. Create a `.vscode/launch.json` file (see VS Code Configuration section below)
+2. Update the `--connection-string` argument with your values
+3. Open the Run and Debug view (Ctrl+Shift+D or Cmd+Shift+D)
+4. Select "Launch STDIO Server" from the dropdown
+5. Press F5 to start debugging
+
+This will:
+
+- Build the TypeScript code
+- Launch the server in STDIO mode
+- Open a browser for OAuth authentication
+- Attach the debugger for breakpoint debugging
+
+**Option 4: Using MCP Inspector**
+
+For testing MCP tools interactively with a web UI, you need to create a wrapper script due to the MCP Inspector's handling of semicolons in arguments.
+
+Create a file named `run-stdio.bat` (Windows) or `run-stdio.sh` (Mac/Linux):
+
+**Windows (run-stdio.bat):**
+
+```batch
+@echo off
+node dist/index.js --connection-string="AuthType=OAuth;Url=https://yourorg.crm.dynamics.com;ClientId=your-client-id;RedirectUri=http://localhost;LoginPrompt=Auto"
+```
+
+**Mac/Linux (run-stdio.sh):**
+
+```bash
+#!/bin/bash
+node dist/index.js --connection-string="AuthType=OAuth;Url=https://yourorg.crm.dynamics.com;ClientId=your-client-id;RedirectUri=http://localhost;LoginPrompt=Auto"
+```
+
+Then run the Inspector:
+
+```bash
+# Windows
+npx @modelcontextprotocol/inspector run-stdio.bat
+
+# Mac/Linux
+chmod +x run-stdio.sh
+npx @modelcontextprotocol/inspector ./run-stdio.sh
+```
+
+This opens a web interface where you can:
+
+- Browse available tools
+- Test tool invocations
+- See request/response payloads
+- Monitor server logs
+
+### VS Code Configuration
+
+Create a `.vscode/launch.json` file for debugging:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch STDIO Server",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/dist/index.js",
+      "args": [
+        "--connection-string=AuthType=OAuth;Url=https://yourorg.crm.dynamics.com;ClientId=your-client-id;RedirectUri=http://localhost;LoginPrompt=Auto"
+      ],
+      "preLaunchTask": "npm: build",
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch HTTP Server",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/dist/index.js",
+      "args": ["--mode=http"],
+      "preLaunchTask": "npm: build",
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true,
+      "env": {
+        "AZURE_AD_TENANT_ID": "your-tenant-id",
+        "AZURE_AD_CLIENT_ID": "your-client-id",
+        "AZURE_AD_CLIENT_SECRET": "your-secret",
+        "DATAVERSE_URL": "https://yourorg.crm.dynamics.com",
+        "DATAVERSE_API_VERSION": "v9.2"
+      }
+    }
+  ]
+}
+```
+
+> **Note:** Replace the placeholder values (`yourorg`, `your-client-id`, etc.) with your actual Dataverse and Entra ID configuration.
+
+### Testing
+
+Run unit tests:
+
+```bash
+npm test
+```
+
+Run tests in watch mode:
+
+```bash
+npm run test:watch
+```
+
+Run tests with coverage:
+
+```bash
+npm run test:coverage
+```
+
+### Troubleshooting Local Development
+
+**Authentication Issues:**
+
+- Ensure your app registration has the correct redirect URI: `http://localhost` (Public client/native)
+- Verify `Dynamics CRM` > `user_impersonation` permission is granted
+- Check that your connection string has the correct Client ID and Dataverse URL
+- For HTTP mode, verify `config.json` or environment variables are set correctly
+
+**Connection String Required Error:**
+
+- STDIO mode requires a `--connection-string` argument
+- The npm script `npm run start:stdio` won't work without modifying it to include the connection string
+- Use the command line or VS Code debugger with the full connection string instead
+
+**MCP Inspector Connection String Issues:**
+
+- The Inspector splits arguments at semicolons, breaking connection strings
+- Create a wrapper script (`.bat` or `.sh` file) that contains the full connection string
+- Run the wrapper script with the Inspector instead of passing the connection string directly
+- See "Option 4: Using MCP Inspector" in the Running in VS Code section for details
+
+**Build Errors:**
+
+- Delete `node_modules` and `dist` folders, then run `npm install` and `npm run build`
+- Ensure TypeScript version is compatible (check `package.json`)
+
+**Connection Issues:**
+
+- Verify the Dataverse URL is correct and accessible
+- Check network connectivity and firewall settings
+- Ensure your user account has access to the Dataverse environment
+
 ## What is MCP?
 
 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) is an open protocol that standardizes how applications provide context to LLMs. MCP provides a standardized way to connect AI models to different data sources and tools, allowing seamless integration of Dataverse capabilities into AI-powered applications.
@@ -313,6 +523,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. 
+This project may contain trademarks or logos for projects, products, or services.
 Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
 Any use of third-party trademarks or logos are subject to those third-party's policies.

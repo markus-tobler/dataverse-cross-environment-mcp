@@ -1,0 +1,2 @@
+@echo off
+node dist/index.js --connection-string="AuthType=OAuth;Url=https://frequent-refresh-sandbox.crm.dynamics.com/;Username=student1@qfwq.onmicrosoft.com;ClientId=51f81489-12ee-4a9e-aaae-a2591f45987d;LoginPrompt=Auto;RedirectUri=http://localhost/"
