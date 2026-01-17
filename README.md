@@ -50,7 +50,7 @@ STDIO mode uses interactive OAuth authentication and requires a Dataverse connec
 
 **Connection String Format:**
 
-```
+```txt
 AuthType=OAuth;Url=<dataverse-url>;ClientId=<app-client-id>;RedirectUri=http://localhost;LoginPrompt=Auto
 ```
 
