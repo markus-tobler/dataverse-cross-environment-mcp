@@ -4,6 +4,10 @@ name: dataverse-mcp
 metadata:
   template: azd-init@1.15.1
 
+infra:
+  provider: bicep
+  path: infra
+
 services:
   dataverse-mcp:
     project: .

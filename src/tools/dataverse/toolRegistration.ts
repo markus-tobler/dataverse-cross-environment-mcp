@@ -9,6 +9,155 @@ export interface RequestContextProvider {
   getUserInfo(): string;
 }
 
+/**
+ * Format a detailed, context-aware error message for record create/update operations
+ * @param error - The caught error object
+ * @param operation - The operation being performed ('create' or 'update')
+ * @param params - The parameters from the tool invocation
+ * @returns Formatted error message with helpful guidance
+ */
+function formatRecordOperationError(
+  error: any,
+  operation: "create" | "update",
+  params: { table: string; record_id?: string }
+): string {
+  // Extract concise error message from verbose API responses
+  let errorDetails = error.message || "Unknown error occurred";
+
+  // For Dataverse API errors with verbose stack traces, extract just the key message
+  if (errorDetails.includes("Dataverse API request failed")) {
+    const match = errorDetails.match(/"message":"([^"]+)"/);
+    if (match && match[1]) {
+      errorDetails = match[1];
+      // Clean up common escape sequences and link references
+      errorDetails = errorDetails
+        .replace(/\\r\\n/g, " ")
+        .replace(/\s+/g, " ")
+        .replace(/For more information.*?--+>.*$/, "")
+        .replace(/InnerException\s*:\s*\S+\.\S+Exception:\s*/, "")
+        .trim();
+    } else {
+      // Fallback: Extract just the first line if it's a multi-line error
+      const lines = errorDetails.split("\n");
+      errorDetails = lines[0];
+    }
+  }
+
+  let helpfulGuidance = "";
+
+  // Lookup resolution errors
+  if (errorDetails.includes("Could not resolve lookup value")) {
+    const attrMatch = errorDetails.match(/attribute (\w+)/);
+    const attribute = attrMatch ? attrMatch[1] : "the lookup field";
+    helpfulGuidance =
+      `\n\nLookup Field Help for '${attribute}':\n` +
+      `Accepted formats:\n` +
+      `  - GUID only: "12345678-1234-1234-1234-123456789abc" (for non-polymorphic lookups)\n` +
+      `  - Web API style: "accounts(12345678-1234-1234-1234-123456789abc)"\n` +
+      `  - Entity/GUID pair: "account=12345678-1234-1234-1234-123456789abc"\n` +
+      `  - Primary name: "Contoso Ltd" (must be unique in the target table)\n\n` +
+      `Use describe_table_format to see which entity types this lookup can reference and get detailed examples.`;
+  }
+  // Option set resolution errors
+  else if (errorDetails.includes("Could not resolve option set value")) {
+    const attrMatch = errorDetails.match(/attribute (\w+)/);
+    const attribute = attrMatch ? attrMatch[1] : "the choice field";
+    helpfulGuidance =
+      `\n\nChoice/Option Set Help for '${attribute}':\n` +
+      `Accepted formats:\n` +
+      `  - Integer value: 1, 2, 727000000, etc.\n` +
+      `  - Label name: "Active", "Inactive", etc. (must be unique)\n\n` +
+      `Use describe_table_format to see all available options with their integer values and labels.`;
+  }
+  // Multiple matches for lookups or option sets
+  else if (
+    errorDetails.includes("Multiple") &&
+    errorDetails.includes("found")
+  ) {
+    helpfulGuidance =
+      `\n\nThe value you provided matches multiple records or options.\n` +
+      `Please use a more specific identifier:\n` +
+      `  - For lookups: Use the GUID instead of the name\n` +
+      `  - For option sets: Use the integer value instead of the label`;
+  }
+  // Record not found (update only)
+  else if (
+    operation === "update" &&
+    (errorDetails.includes("does not exist") ||
+      errorDetails.includes("not found"))
+  ) {
+    helpfulGuidance =
+      `\n\nThe record with ID '${params.record_id}' was not found.\n` +
+      `Verify the record ID using search or query tools.`;
+  }
+  // Required field errors - specific missing attributes validation
+  else if (errorDetails.includes("Missing required attributes")) {
+    // Our validation already provides detailed guidance, so just pass through
+    helpfulGuidance = "";
+  }
+  // Required field errors - generic
+  else if (
+    errorDetails.includes("required") ||
+    errorDetails.includes("Required")
+  ) {
+    helpfulGuidance =
+      `\n\nA required field is missing or invalid.\n` +
+      `Use describe_table_format to see which fields are required and their exact format requirements.`;
+  }
+  // Data type errors
+  else if (errorDetails.includes("type") || errorDetails.includes("invalid")) {
+    helpfulGuidance =
+      `\n\nData type mismatch detected.\n` +
+      `Use describe_table_format to see the expected data types, constraints, and format examples for each field.`;
+  }
+  // HTTP errors from Dataverse API
+  else if (
+    errorDetails.includes("400") ||
+    errorDetails.includes("Bad Request")
+  ) {
+    helpfulGuidance =
+      `\n\nThe Dataverse API rejected the request.\n` +
+      `Common causes:\n` +
+      `  - Invalid field names (use describe_table_format to verify)\n` +
+      `  - Data type mismatches\n` +
+      (operation === "update"
+        ? `  - Attempting to update read-only fields\n`
+        : `  - Required fields missing\n`) +
+      `  - Invalid lookup references`;
+  } else if (
+    errorDetails.includes("403") ||
+    errorDetails.includes("Forbidden")
+  ) {
+    helpfulGuidance = `\n\nPermission denied. You don't have sufficient privileges to ${operation} ${
+      operation === "create" ? "records in" : ""
+    } this ${operation === "create" ? "table" : "record"}.`;
+  } else if (
+    errorDetails.includes("404") ||
+    errorDetails.includes("Not Found")
+  ) {
+    if (operation === "create") {
+      helpfulGuidance =
+        `\n\nThe table or related record was not found.\n` +
+        `  - Verify the table name using list_tables\n` +
+        `  - For lookups, ensure the referenced record exists`;
+    } else {
+      helpfulGuidance =
+        `\n\nThe table or record was not found.\n` +
+        `  - Verify the table name using list_tables\n` +
+        `  - Verify the record ID using search or retrieve_record`;
+    }
+  }
+
+  const recordInfo =
+    operation === "update"
+      ? `'${params.record_id}' in table '${params.table}'`
+      : `in table '${params.table}'`;
+
+  return `Error ${
+    operation === "update" ? "updating" : "creating"
+  } record ${recordInfo}:\n\n${errorDetails}${helpfulGuidance}`;
+}
+
 export function registerDataverseTools(
   server: McpServer,
   dataverseClient: DataverseClient,
@@ -166,7 +315,7 @@ export function registerDataverseTools(
           .union([z.string(), z.array(z.string())])
           .optional()
           .describe(
-            "Optional: Logical name(s) of specific table(s) to search within (e.g., 'account' or ['account', 'contact']). If not provided, searches across all enabled tables. When specified, returns only important columns for better performance."
+            "Optional: Table name(s) to search within - can be logical name (e.g., 'salesorder') or entity set name (e.g., 'salesorders'). Accepts a single table name or an array like ['account', 'contact']. If not provided, searches across all enabled tables. When specified, returns only important columns for better performance."
           ),
         top: z
           .number()
@@ -320,12 +469,9 @@ export function registerDataverseTools(
         );
 
         const req = contextProvider.getContext();
-        const logicalName = await dataverseClient.resolveLogicalName(
-          params.tableName,
-          req
-        );
+        // DataverseClient.retrieveRecord now handles resolution internally
         const record = await dataverseClient.retrieveRecord(
-          logicalName,
+          params.tableName,
           params.recordId,
           req,
           params.allColumns || false
@@ -481,12 +627,9 @@ export function registerDataverseTools(
         );
 
         const req = contextProvider.getContext();
-        const logicalName = await dataverseClient.resolveLogicalName(
-          params.tableName,
-          req
-        );
+        // DataverseClient.describeTable now handles resolution internally
         const description = await dataverseClient.describeTable(
-          logicalName,
+          params.tableName,
           params.full || false,
           req
         );
@@ -541,6 +684,118 @@ export function registerDataverseTools(
               error.message?.includes("not found")
             ? `Table '${params.tableName}' not found. Use the 'list_tables' tool to see available tables.`
             : `Unexpected error while describing table: ${error.message}. Please check the server logs for more details.`;
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  error: true,
+                  error_type: error.name,
+                  message: errorMessage,
+                  details: error.message,
+                  table_name: params.tableName,
+                  suggestion:
+                    "Use the 'list_tables' tool to verify the table name exists, or check if you have permissions to access this table.",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    "describe_table_format",
+    {
+      description:
+        "Get comprehensive format information for creating valid records in a Dataverse table. This tool is specifically designed for LLM agents and provides detailed metadata about field types, option sets (choices), boolean values, lookup targets, and constraints. Use this tool BEFORE attempting to create or update records to understand the exact format requirements and valid values for each field. The response includes detailed guidance on how to format lookups, option sets, booleans, and other field types, along with multiple example values for each field.",
+      inputSchema: {
+        tableName: z
+          .string()
+          .describe(
+            "The logical name or entity set name of the table (e.g., 'account', 'contact', 'accounts')"
+          ),
+      },
+    },
+    async (params: { tableName: string }) => {
+      try {
+        const userInfo = contextProvider.getUserInfo();
+        logger.info(
+          `Executing DescribeTableFormat tool for user ${userInfo} - Table: ${params.tableName}`
+        );
+
+        const req = contextProvider.getContext();
+        // DataverseClient.describeTableFormat now handles resolution internally
+        const formatDescription = await dataverseClient.describeTableFormat(
+          params.tableName,
+          req
+        );
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  table: {
+                    logical_name: formatDescription.logicalName,
+                    display_name: formatDescription.displayName,
+                    description: formatDescription.description,
+                    primary_id_attribute: formatDescription.primaryIdAttribute,
+                    primary_name_attribute:
+                      formatDescription.primaryNameAttribute,
+                  },
+                  required_attributes: formatDescription.requiredAttributes,
+                  creation_guidance: formatDescription.creationGuidance,
+                  attributes: formatDescription.attributes.map((attr) => ({
+                    logical_name: attr.logicalName,
+                    display_name: attr.displayName,
+                    description: attr.description,
+                    type: attr.type,
+                    is_primary_id: attr.isPrimaryId,
+                    is_primary_name: attr.isPrimaryName,
+                    is_required: attr.isRequired,
+                    is_read_only: attr.isReadOnly,
+                    is_valid_for_create: attr.isValidForCreate,
+                    is_valid_for_update: attr.isValidForUpdate,
+                    max_length: attr.maxLength,
+                    min_value: attr.minValue,
+                    max_value: attr.maxValue,
+                    precision: attr.precision,
+                    format: attr.format,
+                    option_set: attr.optionSet,
+                    boolean_options: attr.booleanOptions,
+                    lookup_targets: attr.lookupTargets,
+                    format_guidance: attr.formatGuidance,
+                    example_values: attr.exampleValues,
+                  })),
+                  attribute_count: formatDescription.attributes.length,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error: any) {
+        logger.error("Error executing DescribeTableFormat tool:", error);
+
+        const errorMessage =
+          error.name === "Error" &&
+          error.message.includes("Configuration error")
+            ? `Configuration error: ${error.message}. Please verify that the Dataverse instance URL is correctly configured.`
+            : error.name === "Error" &&
+              error.message.includes("Authentication error")
+            ? `Authentication error: ${error.message}. The current user may not have permission to access table metadata.`
+            : error.message?.includes("does not exist") ||
+              error.message?.includes("not found")
+            ? `Table '${params.tableName}' not found. Use the 'list_tables' tool to see available tables.`
+            : `Unexpected error while describing table format: ${error.message}. Please check the server logs for more details.`;
 
         return {
           content: [
@@ -686,42 +941,27 @@ export function registerDataverseTools(
           req
         );
 
-        const content: any[] = [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                query: params.queryIdOrName,
-                table_name: result.tableName,
-                total_record_count: result.totalRecordCount,
-                records: result.records.map((r) => ({
-                  record_id: r.recordId,
-                  deep_link: r.deepLink,
-                  attributes: r.attributes,
-                })),
-              },
-              null,
-              2
-            ),
-          },
-        ];
-
-        // Add resource links for each record
-        result.records.forEach((r) => {
-          content.push({
-            type: "resource_link",
-            uri: `dataverse:///${result.tableName}/${r.recordId}`,
-            name: r.recordId,
-            description: `${result.tableName} record`,
-            mimeType: "application/json",
-            annotations: {
-              audience: ["assistant"],
-              priority: 0.8,
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  query: params.queryIdOrName,
+                  table_name: result.tableName,
+                  total_record_count: result.totalRecordCount,
+                  records: result.records.map((r) => ({
+                    record_id: r.recordId,
+                    deep_link: r.deepLink,
+                    attributes: r.attributes,
+                  })),
+                },
+                null,
+                2
+              ),
             },
-          });
-        });
-
-        return { content };
+          ],
+        };
       } catch (error: any) {
         logger.error("Error executing RunPredefinedQuery tool:", error);
 
@@ -802,41 +1042,26 @@ export function registerDataverseTools(
           req
         );
 
-        const content: any[] = [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                table_name: result.tableName,
-                total_record_count: result.totalRecordCount,
-                records: result.records.map((r) => ({
-                  record_id: r.recordId,
-                  deep_link: r.deepLink,
-                  attributes: r.attributes,
-                })),
-              },
-              null,
-              2
-            ),
-          },
-        ];
-
-        // Add resource links for each record
-        result.records.forEach((r) => {
-          content.push({
-            type: "resource_link",
-            uri: `dataverse:///${result.tableName}/${r.recordId}`,
-            name: r.recordId,
-            description: `${result.tableName} record`,
-            mimeType: "application/json",
-            annotations: {
-              audience: ["assistant"],
-              priority: 0.8,
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  table_name: result.tableName,
+                  total_record_count: result.totalRecordCount,
+                  records: result.records.map((r) => ({
+                    record_id: r.recordId,
+                    deep_link: r.deepLink,
+                    attributes: r.attributes,
+                  })),
+                },
+                null,
+                2
+              ),
             },
-          });
-        });
-
-        return { content };
+          ],
+        };
       } catch (error: any) {
         logger.error("Error executing RunCustomQuery tool:", error);
 
@@ -895,6 +1120,119 @@ export function registerDataverseTools(
             {
               type: "text",
               text: JSON.stringify(responseContent, null, 2),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    "create_record",
+    {
+      description:
+        "Create a new record in a Dataverse table. IMPORTANT: Use describe_table_format first to understand the exact format requirements for each field including valid option set values, lookup targets, and data type constraints. This will ensure you provide correctly formatted data.",
+      inputSchema: z.object({
+        table: z
+          .string()
+          .describe("The logical name of the table to create the record in."),
+        data: z
+          .object({})
+          .passthrough()
+          .describe("A JSON object containing the data for the new record."),
+      }),
+    },
+    async (params: any) => {
+      try {
+        const { table, data } = params;
+        const userInfo = contextProvider.getUserInfo();
+        logger.info(
+          `Executing CreateRecord tool for user ${userInfo} on table ${table}`
+        );
+
+        const req = contextProvider.getContext();
+        const recordId = await dataverseClient.createRecord(table, data, req);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Successfully created record with ID: ${recordId}`,
+            },
+            {
+              type: "resource_link",
+              uri: `dataverse:///${table}/${recordId}`,
+              name: "Created Record",
+              description: `The newly created record in ${table}`,
+              mimeType: "application/json",
+            },
+          ],
+        };
+      } catch (error: any) {
+        logger.error("Error executing CreateRecord tool:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: formatRecordOperationError(error, "create", params),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    "update_record",
+    {
+      description:
+        "Update an existing record in a Dataverse table. IMPORTANT: Use describe_table_format first to understand the exact format requirements for each field including valid option set values, lookup targets, and data type constraints. This will ensure you provide correctly formatted data.",
+      inputSchema: z.object({
+        table: z
+          .string()
+          .describe("The logical name of the table to update the record in."),
+        record_id: z.string().describe("The ID of the record to update."),
+        data: z
+          .object({})
+          .passthrough()
+          .describe(
+            "A JSON object containing the data to update on the record."
+          ),
+      }),
+    },
+    async (params: any) => {
+      try {
+        const { table, record_id, data } = params;
+        const userInfo = contextProvider.getUserInfo();
+        logger.info(
+          `Executing UpdateRecord tool for user ${userInfo} on table ${table} and record ${record_id}`
+        );
+
+        const req = contextProvider.getContext();
+        await dataverseClient.updateRecord(table, record_id, data, req);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Successfully updated record with ID: ${record_id}`,
+            },
+            {
+              type: "resource_link",
+              uri: `dataverse:///${table}/${record_id}`,
+              name: "Updated Record",
+              description: `The updated record in ${table}`,
+              mimeType: "application/json",
+            },
+          ],
+        };
+      } catch (error: any) {
+        logger.error("Error executing UpdateRecord tool:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: formatRecordOperationError(error, "update", params),
             },
           ],
         };

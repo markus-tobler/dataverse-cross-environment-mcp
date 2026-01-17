@@ -72,6 +72,8 @@ export interface AttributeMetadata {
   MinValue?: number;
   MaxValue?: number;
   OptionSet?: {
+    Name?: string;
+    IsGlobal?: boolean;
     Options: Array<{
       Value: number;
       Label: {
@@ -121,6 +123,72 @@ export interface AttributeDescription {
   maxLength?: number;
   format?: string;
   exampleValue: any;
+  targets?: string[];
+  optionSet?: Array<{
+    value: number;
+    label: string;
+  }>;
+}
+
+/**
+ * Attribute format description with detailed information for creating valid records
+ */
+export interface AttributeFormatDescription {
+  logicalName: string;
+  displayName: string;
+  description?: string;
+  type: string;
+  isPrimaryId: boolean;
+  isPrimaryName: boolean;
+  isRequired: boolean;
+  isReadOnly: boolean;
+  isValidForCreate: boolean;
+  isValidForUpdate: boolean;
+  maxLength?: number;
+  minValue?: number;
+  maxValue?: number;
+  precision?: number;
+  format?: string;
+  // For option sets (picklists)
+  optionSet?: {
+    name: string;
+    isGlobal: boolean;
+    options: Array<{
+      value: number;
+      label: string;
+      description?: string;
+    }>;
+  };
+  // For boolean fields
+  booleanOptions?: {
+    trueOption: { value: number; label: string };
+    falseOption: { value: number; label: string };
+  };
+  // For lookup/customer/owner fields
+  lookupTargets?: Array<{
+    entityLogicalName: string;
+    entityDisplayName: string;
+    primaryIdAttribute: string;
+    primaryNameAttribute: string;
+  }>;
+  // Guidance for LLM agents
+  formatGuidance: string;
+  exampleValues: string[];
+}
+
+/**
+ * Table format description for creating valid records
+ */
+export interface TableFormatDescription {
+  logicalName: string;
+  displayName: string;
+  description?: string;
+  primaryIdAttribute: string;
+  primaryNameAttribute?: string;
+  attributes: AttributeFormatDescription[];
+  requiredAttributes: string[];
+  // General guidance for creating records
+  creationGuidance: string;
 }
 
 /**

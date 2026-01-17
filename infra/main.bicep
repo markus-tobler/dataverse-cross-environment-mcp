@@ -1,4 +1,4 @@
-targetScope = 'subscription'
+targetScope = 'resourceGroup'
 
 @minLength(1)
 @maxLength(64)
@@ -7,9 +7,12 @@ param environmentName string
 
 @minLength(1)
 @description('Primary location for all resources')
-param location string
+param location string = resourceGroup().location
 
 param dataverseMcpExists bool
+
+@description('Skip automatic role assignments (use when you have Owner permissions and will configure manually)')
+param skipRoleAssignments bool = false
 
 @description('Id of the user or app to assign application roles')
 param principalId string
@@ -30,6 +33,10 @@ param dataverseUrl string
 @description('Dataverse API Version (default: v9.2)')
 param dataverseApiVersion string = 'v9.2'
 
+@description('Log level for the application (DEBUG, INFO, WARN, ERROR)')
+@allowed(['DEBUG', 'INFO', 'WARN', 'ERROR'])
+param logLevel string = 'INFO'
+
 // Tags that should be applied to all resources.
 // 
 // Note that 'azd-service-name' tags should be applied separately to service host resources.
@@ -39,26 +46,20 @@ var tags = {
   'azd-env-name': environmentName
 }
 
-// Organize resources in a resource group
-resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
-  name: 'rg-${environmentName}'
-  location: location
-  tags: tags
-}
-
 module resources 'resources.bicep' = {
-  scope: rg
   name: 'resources'
   params: {
     location: location
     tags: tags
     principalId: principalId
     dataverseMcpExists: dataverseMcpExists
+    skipRoleAssignments: skipRoleAssignments
     azureAdTenantId: azureAdTenantId
     azureAdClientId: azureAdClientId
     sessionSecret: sessionSecret
     dataverseUrl: dataverseUrl
     dataverseApiVersion: dataverseApiVersion
+    logLevel: logLevel
   }
 }
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = resources.outputs.AZURE_CONTAINER_REGISTRY_ENDPOINT

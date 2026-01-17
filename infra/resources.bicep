@@ -25,6 +25,13 @@ param dataverseUrl string
 @description('Dataverse API Version (default: v9.2)')
 param dataverseApiVersion string = 'v9.2'
 
+@description('Skip automatic role assignments (use when you have Owner permissions and will configure manually)')
+param skipRoleAssignments bool = false
+
+@description('Log level for the application (DEBUG, INFO, WARN, ERROR)')
+@allowed(['DEBUG', 'INFO', 'WARN', 'ERROR'])
+param logLevel string = 'INFO'
+
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location)
 
@@ -48,6 +55,10 @@ var baseEnvVars = [
   {
     name: 'NODE_ENV'
     value: 'production'
+  }
+  {
+    name: 'LOG_LEVEL'
+    value: logLevel
   }
 ]
 
@@ -107,16 +118,18 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.1.1' =
     location: location
     tags: tags
     publicNetworkAccess: 'Enabled'
-    roleAssignments: [
-      {
-        principalId: dataverseMcpIdentity.outputs.principalId
-        principalType: 'ServicePrincipal'
-        roleDefinitionIdOrName: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-        )
-      }
-    ]
+    roleAssignments: skipRoleAssignments
+      ? []
+      : [
+          {
+            principalId: dataverseMcpIdentity.outputs.principalId
+            principalType: 'ServicePrincipal'
+            roleDefinitionIdOrName: subscriptionResourceId(
+              'Microsoft.Authorization/roleDefinitions',
+              '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+            )
+          }
+        ]
   }
 }
 

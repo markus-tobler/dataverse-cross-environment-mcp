@@ -4,6 +4,7 @@ import {
   TableDescription,
   TableMetadata,
   WhoAmIResponse,
+  TableFormatDescription,
 } from "../../types/dataverse.js";
 import { ConnectionStringParams } from "../../utils/connectionStringParser.js";
 import { AuthService } from "./AuthService.js";
@@ -77,9 +78,14 @@ export class DataverseClient {
     allColumns: boolean = false
   ): Promise<Record<string, any>> {
     const service = await this.createDataverseService(req);
+    // Resolve to logical name (service methods require LogicalName)
+    const logicalName = await this.metadataService.resolveLogicalName(
+      service,
+      tableName
+    );
     return this.dataService.retrieveRecord(
       service,
-      tableName,
+      logicalName,
       recordId,
       allColumns
     );
@@ -91,7 +97,25 @@ export class DataverseClient {
     req?: Request
   ): Promise<TableDescription> {
     const service = await this.createDataverseService(req);
-    return this.metadataService.describeTable(service, tableName, full);
+    // Resolve to logical name (EntityDefinitions API requires LogicalName)
+    const logicalName = await this.metadataService.resolveLogicalName(
+      service,
+      tableName
+    );
+    return this.metadataService.describeTable(service, logicalName, full);
+  }
+
+  async describeTableFormat(
+    tableName: string,
+    req?: Request
+  ): Promise<TableFormatDescription> {
+    const service = await this.createDataverseService(req);
+    // Resolve to logical name (EntityDefinitions API requires LogicalName)
+    const logicalName = await this.metadataService.resolveLogicalName(
+      service,
+      tableName
+    );
+    return this.metadataService.describeTableFormat(service, logicalName);
   }
 
   async resolveLogicalName(tableName: string, req?: Request): Promise<string> {
@@ -113,7 +137,11 @@ export class DataverseClient {
     req?: Request
   ): Promise<import("../../types/dataverse.js").QueryResult> {
     const service = await this.createDataverseService(req);
-    return this.dataService.runPredefinedQuery(service, queryIdOrName, tableName);
+    return this.dataService.runPredefinedQuery(
+      service,
+      queryIdOrName,
+      tableName
+    );
   }
 
   async runCustomQuery(
@@ -123,5 +151,34 @@ export class DataverseClient {
   ): Promise<import("../../types/dataverse.js").QueryResult> {
     const service = await this.createDataverseService(req);
     return this.dataService.runCustomQuery(service, fetchXml, tableName);
+  }
+
+  async createRecord(
+    tableName: string,
+    data: Record<string, any>,
+    req?: Request
+  ): Promise<string> {
+    const service = await this.createDataverseService(req);
+    // Resolve to logical name (service methods require LogicalName)
+    const logicalName = await this.metadataService.resolveLogicalName(
+      service,
+      tableName
+    );
+    return this.dataService.createRecord(service, logicalName, data);
+  }
+
+  async updateRecord(
+    tableName: string,
+    recordId: string,
+    data: Record<string, any>,
+    req?: Request
+  ): Promise<void> {
+    const service = await this.createDataverseService(req);
+    // Resolve to logical name (service methods require LogicalName)
+    const logicalName = await this.metadataService.resolveLogicalName(
+      service,
+      tableName
+    );
+    return this.dataService.updateRecord(service, logicalName, recordId, data);
   }
 }

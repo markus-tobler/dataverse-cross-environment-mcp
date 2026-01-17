@@ -334,6 +334,128 @@ Now, you will configure the `Dataverse MCP Connector` App Registration to trust 
 - Verify the MCP Server App has `user_impersonation` permission for Dynamics CRM
 - Check that users have granted consent to the applications
 
+#### Deployment Failures and Resource Cleanup
+
+If `azd up` times out or fails during deployment, Azure may leave resources in a failed provisioning state. Subsequent deployments will fail because Azure cannot update resources that are in a failed state.
+
+**When to use this solution:**
+
+- First deployment attempt times out
+- You see errors like "ResourceDeploymentFailure" or "reached terminal provisioning state 'Failed'"
+- Deployment fails with "dataverse-mcp-fetch-image" errors
+- Resources are stuck in "Failed" provisioning state
+
+**Quick cleanup and retry:**
+
+```powershell
+# Set your resource group name
+$RESOURCE_GROUP = "your-resource-group-name"
+
+# Clean up failed resources
+Write-Host "Cleaning up failed resources..."
+az containerapp delete --resource-group $RESOURCE_GROUP --name dataverse-mcp --yes 2>$null
+az deployment group delete --resource-group $RESOURCE_GROUP --name dataverse-mcp-fetch-image 2>$null
+az deployment group delete --resource-group $RESOURCE_GROUP --name dataverseMcp 2>$null
+az deployment group delete --resource-group $RESOURCE_GROUP --name resources 2>$null
+
+# Reset deployment flags
+azd env set SERVICE_DATAVERSE_MCP_RESOURCE_EXISTS false
+
+# If you have Owner permissions and role assignments are failing, skip them
+# (see "Role Assignment Failures" below)
+# azd env set SKIP_ROLE_ASSIGNMENTS true
+
+# Retry deployment
+Write-Host "`nRetrying deployment..."
+azd up
+```
+
+**If you need to start completely fresh:**
+
+```powershell
+# List all resources to verify before deleting
+az resource list --resource-group $RESOURCE_GROUP --output table
+
+# Delete all resources in the resource group
+az resource list --resource-group $RESOURCE_GROUP --query "[].id" -o tsv | ForEach-Object {
+    az resource delete --ids $_ --verbose
+}
+
+# Then retry deployment
+azd up
+```
+
+#### Role Assignment Failures
+
+Even with Owner permissions on the resource group, the automatic role assignment during deployment can fail due to Azure Policy restrictions, custom RBAC configurations, or timing issues.
+
+**Symptoms:**
+
+- Deployment fails with "AuthorizationFailed for roleAssignments" errors
+- Error mentions "Microsoft.Authorization/roleAssignments/write" permission
+- You have confirmed you have Owner role on the resource group
+
+**Solution: Skip role assignments during deployment and configure manually:**
+
+```powershell
+# Skip automatic role assignments
+azd env set SKIP_ROLE_ASSIGNMENTS true
+
+# Deploy
+azd up
+```
+
+**After deployment succeeds, manually assign the required role:**
+
+```powershell
+$RESOURCE_GROUP = "your-resource-group-name"
+
+# Get managed identity principal ID
+$IDENTITY_PRINCIPAL_ID = az identity list `
+  --resource-group $RESOURCE_GROUP `
+  --query "[?contains(name, 'dataverse-mcp')].principalId" -o tsv
+
+# Get ACR name
+$ACR_NAME = az acr list `
+  --resource-group $RESOURCE_GROUP `
+  --query "[0].name" -o tsv
+
+# Get subscription ID
+$SUBSCRIPTION_ID = az account show --query id -o tsv
+
+# Assign AcrPull role to the managed identity
+az role assignment create `
+  --assignee $IDENTITY_PRINCIPAL_ID `
+  --role "AcrPull" `
+  --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.ContainerRegistry/registries/$ACR_NAME"
+
+Write-Host "✅ Role assignment completed successfully"
+
+# Restart container app to pick up new permissions
+$REVISION_NAME = az containerapp revision list `
+  --resource-group $RESOURCE_GROUP `
+  --name dataverse-mcp `
+  --query "[0].name" -o tsv
+
+az containerapp revision restart `
+  --resource-group $RESOURCE_GROUP `
+  --name dataverse-mcp `
+  --revision $REVISION_NAME
+
+Write-Host "✅ Container app restarted"
+```
+
+**Verify the role assignment:**
+
+```powershell
+# Check role assignments on the ACR
+az role assignment list `
+  --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.ContainerRegistry/registries/$ACR_NAME" `
+  --output table
+```
+
+For more details on deploying with skip role assignments, see [SKIP_ROLE_ASSIGNMENTS.md](./SKIP_ROLE_ASSIGNMENTS.md).
+
 ### Getting Help
 
 For issues and questions:

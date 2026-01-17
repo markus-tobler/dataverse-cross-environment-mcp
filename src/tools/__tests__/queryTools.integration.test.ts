@@ -22,7 +22,11 @@ describe("Query Tools Integration Tests", () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    server = { tool: jest.fn() } as any;
+    const toolMock = jest.fn();
+    server = {
+      tool: toolMock,
+      registerTool: toolMock,
+    } as any;
     mockDataverseClient =
       new (DataverseClient as jest.Mock<DataverseClient>)() as jest.Mocked<DataverseClient>;
 
@@ -46,7 +50,7 @@ describe("Query Tools Integration Tests", () => {
         (c) => c[0] === "get_predefined_queries"
       );
       expect(call).toBeDefined();
-      const handler = call![3];
+      const handler = call![2];
 
       const result = await handler({ tableName: "account" });
       expect(mockDataverseClient.getPredefinedQueries).toHaveBeenCalledWith(
@@ -73,7 +77,7 @@ describe("Query Tools Integration Tests", () => {
       const call = server.tool.mock.calls.find(
         (c) => c[0] === "get_predefined_queries"
       );
-      const handler = call![3];
+      const handler = call![2];
 
       const result = await handler({ tableName: "nonexistent" });
       expect(result.content[0].text).toContain('"error": true');
@@ -105,7 +109,7 @@ describe("Query Tools Integration Tests", () => {
         (c) => c[0] === "run_predefined_query"
       );
       expect(call).toBeDefined();
-      const handler = call![3];
+      const handler = call![2];
 
       const result = await handler({
         queryIdOrName: "query-id-123",
@@ -141,7 +145,7 @@ describe("Query Tools Integration Tests", () => {
       const call = server.tool.mock.calls.find(
         (c) => c[0] === "run_predefined_query"
       );
-      const handler = call![3];
+      const handler = call![2];
 
       const result = await handler({ queryIdOrName: "nonexistent" });
       expect(result.content[0].text).toContain('"error": true');
@@ -168,7 +172,7 @@ describe("Query Tools Integration Tests", () => {
         (c) => c[0] === "run_custom_query"
       );
       expect(call).toBeDefined();
-      const handler = call![3];
+      const handler = call![2];
 
       const fetchXml =
         '<fetch><entity name="contact"><attribute name="firstname"/></entity></fetch>';
@@ -203,7 +207,7 @@ describe("Query Tools Integration Tests", () => {
       const call = server.tool.mock.calls.find(
         (c) => c[0] === "run_custom_query"
       );
-      const handler = call![3];
+      const handler = call![2];
 
       const fetchXml = "<fetch><bad-xml></fetch>";
       const result = await handler({ fetchXml });
@@ -220,11 +224,11 @@ describe("Query Tools Integration Tests", () => {
       const call = server.tool.mock.calls.find(
         (c) => c[0] === "run_custom_query"
       );
-      const handler = call![3];
+      const handler = call![2];
 
       const fetchXml = '<fetch><entity name="badentity"></entity></fetch>';
       const result = await handler({ fetchXml });
-      
+
       const response = JSON.parse(result.content[0].text);
       expect(response.error).toBe(true);
       expect(response.dataverse_error).toBeDefined();

@@ -2,6 +2,7 @@ import {
   TableMetadata,
   TableDescription,
   CachedTableDescription,
+  TableFormatDescription,
 } from "../types/dataverse.js";
 import { logger } from "../utils/logger.js";
 
@@ -42,6 +43,10 @@ export class MetadataCacheService {
     new Map();
   private tableDescriptionCache: Map<string, CachedTableDescription> =
     new Map();
+  private tableFormatDescriptionCache: Map<
+    string,
+    CachedItem<TableFormatDescription>
+  > = new Map();
   private entitySetNameCache: Map<string, CachedItem<string>> = new Map();
   private reverseEntitySetNameCache: Map<string, CachedItem<string>> =
     new Map();
@@ -52,6 +57,7 @@ export class MetadataCacheService {
   // Cache expiration times
   private readonly tableMetadataTTL = 24 * 60 * 60 * 1000; // 24 hours
   private readonly tableDescriptionTTL = 24 * 60 * 60 * 1000; // 24 hours
+  private readonly tableFormatDescriptionTTL = 24 * 60 * 60 * 1000; // 24 hours
   private readonly entitySetNameTTL = 24 * 60 * 60 * 1000; // 24 hours
   private readonly importantColumnsTTL = 24 * 60 * 60 * 1000; // 24 hours
   private readonly readableEntityNamesTTL = 24 * 60 * 60 * 1000; // 24 hours
@@ -126,11 +132,51 @@ export class MetadataCacheService {
   }
 
   /**
+   * Get table format description from cache
+   */
+  getTableFormatDescription(
+    dataverseUrl: string,
+    tableName: string
+  ): TableFormatDescription | null {
+    const cacheKey = `${dataverseUrl}_${tableName}_format`;
+    const cached = this.tableFormatDescriptionCache.get(cacheKey);
+
+    if (!cached) {
+      return null;
+    }
+
+    if (this.isExpired(cached.timestamp, this.tableFormatDescriptionTTL)) {
+      this.tableFormatDescriptionCache.delete(cacheKey);
+      return null;
+    }
+
+    return cached.value;
+  }
+
+  /**
+   * Set table format description in cache
+   */
+  setTableFormatDescription(
+    dataverseUrl: string,
+    tableName: string,
+    description: TableFormatDescription
+  ): void {
+    const cacheKey = `${dataverseUrl}_${tableName}_format`;
+    this.tableFormatDescriptionCache.set(cacheKey, {
+      value: description,
+      timestamp: new Date(),
+    });
+  }
+
+  /**
    * Get readable entity names from cache
    * @param dataverseUrl - The Dataverse URL
    * @param userId - User ID for user-specific caching (readable entities are based on user privileges)
    */
-  getReadableEntityNames(dataverseUrl: string, userId: string): Set<string> | null {
+  getReadableEntityNames(
+    dataverseUrl: string,
+    userId: string
+  ): Set<string> | null {
     const cacheKey = `${dataverseUrl}_${userId}_readableEntityNames`;
     const cached = this.readableEntityNamesCache.get(cacheKey);
 
@@ -152,7 +198,11 @@ export class MetadataCacheService {
    * @param userId - User ID for user-specific caching (readable entities are based on user privileges)
    * @param entityNames - Set of entity names
    */
-  setReadableEntityNames(dataverseUrl: string, userId: string, entityNames: Set<string>): void {
+  setReadableEntityNames(
+    dataverseUrl: string,
+    userId: string,
+    entityNames: Set<string>
+  ): void {
     const cacheKey = `${dataverseUrl}_${userId}_readableEntityNames`;
     this.readableEntityNamesCache.set(cacheKey, {
       value: entityNames,
@@ -172,7 +222,7 @@ export class MetadataCacheService {
     tableName: string,
     userId?: string
   ): string[] | null {
-    const cacheKey = userId 
+    const cacheKey = userId
       ? `${dataverseUrl}_${userId}_${tableName}_important`
       : `${dataverseUrl}_${tableName}_important`;
     const cached = this.importantColumnsCache.get(cacheKey);
@@ -202,7 +252,7 @@ export class MetadataCacheService {
     columns: string[],
     userId?: string
   ): void {
-    const cacheKey = userId 
+    const cacheKey = userId
       ? `${dataverseUrl}_${userId}_${tableName}_important`
       : `${dataverseUrl}_${tableName}_important`;
     this.importantColumnsCache.set(cacheKey, {
@@ -245,7 +295,12 @@ export class MetadataCacheService {
         );
         const convertedColumns = await warmCache();
         // Store the converted columns in cache
-        this.setImportantColumns(dataverseUrl, tableName, convertedColumns, userId);
+        this.setImportantColumns(
+          dataverseUrl,
+          tableName,
+          convertedColumns,
+          userId
+        );
         logger.debug(
           `Cached ${convertedColumns.length} converted important columns for ${tableName}:`,
           convertedColumns
@@ -297,8 +352,8 @@ export class MetadataCacheService {
   }
 
   /**
-   * Get entity set name from reverse cache (entity set name -> entity set name)
-   * Used for validating if a name is already an entity set name
+   * Get logical name from reverse cache (entity set name -> logical name)
+   * Used for resolving entity set names to their logical names
    */
   getReverseEntitySetName(
     dataverseUrl: string,
@@ -320,12 +375,16 @@ export class MetadataCacheService {
   }
 
   /**
-   * Set reverse entity set name mapping (entity set name -> entity set name)
+   * Set reverse entity set name mapping (entity set name -> logical name)
    */
-  setReverseEntitySetName(dataverseUrl: string, entitySetName: string): void {
+  setReverseEntitySetName(
+    dataverseUrl: string,
+    entitySetName: string,
+    logicalName: string
+  ): void {
     const cacheKey = `${dataverseUrl}_${entitySetName}`;
     this.reverseEntitySetNameCache.set(cacheKey, {
-      value: entitySetName,
+      value: logicalName,
       timestamp: new Date(),
     });
   }
@@ -340,7 +399,7 @@ export class MetadataCacheService {
     entitySetName: string
   ): void {
     this.setEntitySetName(dataverseUrl, logicalName, entitySetName);
-    this.setReverseEntitySetName(dataverseUrl, entitySetName);
+    this.setReverseEntitySetName(dataverseUrl, entitySetName, logicalName);
   }
 
   /**
