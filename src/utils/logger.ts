@@ -2,6 +2,9 @@
  * Logger utility that handles output correctly based on execution mode
  * - STDIO mode: All output goes to stderr (stdout is reserved for JSON-RPC)
  * - HTTP mode: Uses console.log for info, console.error for errors
+ *
+ * In HTTP mode with Application Insights configured, console output is automatically
+ * captured and sent to Azure Monitor via the setAutoCollectConsole feature.
  */
 
 export enum LogMode {
@@ -14,6 +17,10 @@ export enum LogLevel {
   INFO = 1,
   WARN = 2,
   ERROR = 3,
+}
+
+export interface LogProperties {
+  [key: string]: string | number | boolean | undefined;
 }
 
 class Logger {
@@ -37,6 +44,17 @@ class Logger {
       default:
         return LogLevel.INFO;
     }
+  }
+
+  /**
+   * Format message with optional properties for structured logging
+   */
+  private formatMessage(message: string, properties?: LogProperties): string {
+    if (!properties || Object.keys(properties).length === 0) {
+      return message;
+    }
+    // Include properties in the message for Application Insights to parse
+    return `${message} | ${JSON.stringify(properties)}`;
   }
 
   /**
@@ -66,8 +84,16 @@ class Logger {
       console.error(message, ...args);
     } else {
       // In HTTP mode, use normal console.log
+      // Application Insights auto-collects this as a trace
       console.log(message, ...args);
     }
+  }
+
+  /**
+   * Log an informational message with structured properties
+   */
+  infoWithProperties(message: string, properties: LogProperties): void {
+    this.info(this.formatMessage(message, properties));
   }
 
   /**
@@ -77,7 +103,15 @@ class Logger {
     if (this.logLevel > LogLevel.ERROR) {
       return;
     }
+    // Application Insights auto-collects console.error as error-level trace
     console.error(message, ...args);
+  }
+
+  /**
+   * Log an error message with structured properties
+   */
+  errorWithProperties(message: string, properties: LogProperties): void {
+    this.error(this.formatMessage(message, properties));
   }
 
   /**
@@ -91,8 +125,16 @@ class Logger {
     if (this.mode === LogMode.STDIO) {
       console.error(message, ...args);
     } else {
+      // Application Insights auto-collects console.warn as warning-level trace
       console.warn(message, ...args);
     }
+  }
+
+  /**
+   * Log a warning message with structured properties
+   */
+  warnWithProperties(message: string, properties: LogProperties): void {
+    this.warn(this.formatMessage(message, properties));
   }
 
   /**
@@ -106,8 +148,16 @@ class Logger {
     if (this.mode === LogMode.STDIO) {
       console.error(`[DEBUG] ${message}`, ...args);
     } else {
+      // Application Insights auto-collects console.debug as verbose-level trace
       console.debug(message, ...args);
     }
+  }
+
+  /**
+   * Log a debug message with structured properties
+   */
+  debugWithProperties(message: string, properties: LogProperties): void {
+    this.debug(this.formatMessage(message, properties));
   }
 }
 

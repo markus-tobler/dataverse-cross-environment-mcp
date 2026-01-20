@@ -33,14 +33,16 @@
   "description": "Model Context Protocol server for Microsoft Dataverse with OAuth 2.0 authentication",
   "dependencies": {
     "@azure/identity": "^4.13.0",
+    "@azure/monitor-opentelemetry": "^1.15.1",
     "@azure/msal-node": "^3.8.4",
     "@modelcontextprotocol/sdk": "^1.24.3",
+    "@opentelemetry/api": "^1.9.0",
     "cors": "^2.8.5",
     "express": "^5.2.1",
     "express-jwt": "^8.5.1",
     "express-session": "^1.18.2",
-    "jwks-rsa": "^3.2.0",
     "jsonwebtoken": "^9.0.3",
+    "jwks-rsa": "^3.2.0",
     "passport": "^0.7.0",
     "passport-azure-ad": "^4.3.5",
     "zod": "^4.1.13"

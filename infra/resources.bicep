@@ -49,6 +49,10 @@ var baseEnvVars = [
     value: dataverseMcpIdentity.outputs.clientId
   }
   {
+    name: 'AZURE_LOG_LEVEL'
+    value: 'error'
+  }
+  {
     name: 'PORT'
     value: '3000'
   }

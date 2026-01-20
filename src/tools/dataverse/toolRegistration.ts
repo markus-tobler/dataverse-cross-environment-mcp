@@ -3,10 +3,40 @@ import { z } from "zod";
 import { logger } from "../../utils/logger.js";
 import { Request } from "express";
 import { DataverseClient } from "../../services/dataverse/DataverseClient.js";
+import { appInsightsService } from "../../services/telemetry/ApplicationInsightsService.js";
 
 export interface RequestContextProvider {
   getContext(): Request | undefined;
   getUserInfo(): string;
+}
+
+/**
+ * Track MCP tool execution with Application Insights telemetry.
+ * Measures execution time and tracks success/failure.
+ */
+async function trackToolExecution<T>(
+  toolName: string,
+  userInfo: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const startTime = Date.now();
+  let success = true;
+
+  try {
+    const result = await operation();
+    return result;
+  } catch (error) {
+    success = false;
+    throw error;
+  } finally {
+    const durationMs = Date.now() - startTime;
+    appInsightsService.trackToolInvocation(
+      toolName,
+      durationMs,
+      success,
+      userInfo,
+    );
+  }
 }
 
 /**
@@ -19,7 +49,7 @@ export interface RequestContextProvider {
 function formatRecordOperationError(
   error: any,
   operation: "create" | "update",
-  params: { table: string; record_id?: string }
+  params: { table: string; record_id?: string },
 ): string {
   // Extract concise error message from verbose API responses
   let errorDetails = error.message || "Unknown error occurred";
@@ -161,7 +191,7 @@ function formatRecordOperationError(
 export function registerDataverseTools(
   server: McpServer,
   dataverseClient: DataverseClient,
-  contextProvider: RequestContextProvider
+  contextProvider: RequestContextProvider,
 ) {
   server.registerTool(
     "whoami",
@@ -170,10 +200,10 @@ export function registerDataverseTools(
         "Get information about the current authenticated user from Dataverse",
     },
     async (_params: any) => {
-      try {
-        const userInfo = contextProvider.getUserInfo();
-        logger.info(`Executing WhoAmI tool for user ${userInfo}`);
+      const userInfo = contextProvider.getUserInfo();
+      logger.info(`Executing WhoAmI tool for user ${userInfo}`);
 
+      return trackToolExecution("whoami", userInfo, async () => {
         const req = contextProvider.getContext();
         const whoAmIResponse = await dataverseClient.whoAmI(req);
 
@@ -225,11 +255,8 @@ export function registerDataverseTools(
         });
 
         return { content };
-      } catch (error) {
-        logger.error("Error executing WhoAmI tool:", error);
-        throw error;
-      }
-    }
+      });
+    },
   );
 
   server.registerTool(
@@ -239,10 +266,10 @@ export function registerDataverseTools(
         "List all available Dataverse tables (entities) with their display names and logical names. This tool provides metadata about tables that can be queried and searched in Dataverse. Use this tool to discover what data is available before performing searches or retrievals.",
     },
     async (_params: any) => {
-      try {
-        const userInfo = contextProvider.getUserInfo();
-        logger.info(`Executing ListTables tool for user ${userInfo}`);
+      const userInfo = contextProvider.getUserInfo();
+      logger.info(`Executing ListTables tool for user ${userInfo}`);
 
+      return trackToolExecution("list_tables", userInfo, async () => {
         const req = contextProvider.getContext();
         const tables = await dataverseClient.listTables(req);
 
@@ -261,45 +288,13 @@ export function registerDataverseTools(
                   count: tables.length,
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
         };
-      } catch (error: any) {
-        logger.error("Error executing ListTables tool:", error);
-
-        const errorMessage =
-          error.name === "Error" &&
-          error.message.includes("Configuration error")
-            ? `Configuration error: ${error.message}. Please verify that the Dataverse instance URL is correctly configured.`
-            : error.name === "Error" &&
-              error.message.includes("Authentication error")
-            ? `Authentication error: ${error.message}. The current user may not have permission to retrieve table metadata from Dataverse.`
-            : error.name === "Error" &&
-              error.message.includes("Dataverse API error")
-            ? `Dataverse API error: ${error.message}. This may indicate a connection issue or that the Dataverse instance is unavailable.`
-            : `Unexpected error while listing Dataverse tables: ${error.message}. Please check the server logs for more details.`;
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  error: true,
-                  error_type: error.name,
-                  message: errorMessage,
-                  details: error.message,
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-    }
+      });
+    },
   );
 
   server.registerTool(
@@ -315,13 +310,13 @@ export function registerDataverseTools(
           .union([z.string(), z.array(z.string())])
           .optional()
           .describe(
-            "Optional: Table name(s) to search within - can be logical name (e.g., 'salesorder') or entity set name (e.g., 'salesorders'). Accepts a single table name or an array like ['account', 'contact']. If not provided, searches across all enabled tables. When specified, returns only important columns for better performance."
+            "Optional: Table name(s) to search within - can be logical name (e.g., 'salesorder') or entity set name (e.g., 'salesorders'). Accepts a single table name or an array like ['account', 'contact']. If not provided, searches across all enabled tables. When specified, returns only important columns for better performance.",
           ),
         top: z
           .number()
           .optional()
           .describe(
-            "Optional: Maximum number of results to return (default: 50)"
+            "Optional: Maximum number of results to return (default: 50)",
           ),
       },
     },
@@ -330,24 +325,24 @@ export function registerDataverseTools(
       tableFilter?: string | string[];
       top?: number;
     }) => {
-      try {
-        const userInfo = contextProvider.getUserInfo();
-        const filterDisplay = params.tableFilter
-          ? Array.isArray(params.tableFilter)
-            ? params.tableFilter.join(", ")
-            : params.tableFilter
-          : "none";
+      const userInfo = contextProvider.getUserInfo();
+      const filterDisplay = params.tableFilter
+        ? Array.isArray(params.tableFilter)
+          ? params.tableFilter.join(", ")
+          : params.tableFilter
+        : "none";
 
-        logger.info(
-          `Executing Search tool for user ${userInfo} with term '${params.searchTerm}' and filter '${filterDisplay}'`
-        );
+      logger.info(
+        `Executing Search tool for user ${userInfo} with term '${params.searchTerm}' and filter '${filterDisplay}'`,
+      );
 
+      return trackToolExecution("search", userInfo, async () => {
         const req = contextProvider.getContext();
         const searchResponse = await dataverseClient.search(
           params.searchTerm,
           params.tableFilter,
           params.top || 10,
-          req
+          req,
         );
 
         const content: any[] = [
@@ -367,7 +362,7 @@ export function registerDataverseTools(
                 })),
               },
               null,
-              2
+              2,
             ),
           },
         ];
@@ -387,46 +382,8 @@ export function registerDataverseTools(
         });
 
         return { content };
-      } catch (error: any) {
-        logger.error("Error executing Search tool:", error);
-
-        const errorMessage =
-          error.name === "Error" &&
-          error.message.includes("Configuration error")
-            ? `Configuration error: ${error.message}. Please verify that the Dataverse instance URL is correctly configured.`
-            : error.name === "Error" &&
-              error.message.includes("Authentication error")
-            ? `Authentication error: ${error.message}. The current user may not have permission to perform searches in Dataverse.`
-            : error.message?.includes("Search feature is disabled") ||
-              error.message?.includes("not enabled")
-            ? "Dataverse Search is not enabled for this organization. Please contact your administrator to enable Dataverse Search in the Power Platform admin center."
-            : error.name === "ArgumentError"
-            ? `Invalid parameter: ${error.message}. Please check that the search term and table filter (if provided) are valid.`
-            : `Unexpected error while searching Dataverse: ${error.message}. Please check the server logs for more details.`;
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  error: true,
-                  error_type: error.name,
-                  message: errorMessage,
-                  search_term: params.searchTerm,
-                  table_filter: params.tableFilter,
-                  details: error.message,
-                  suggestion:
-                    "To discover available tables, use the 'list_tables' tool. To check if search is enabled, contact your administrator.",
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-    }
+      });
+    },
   );
 
   server.registerTool(
@@ -438,18 +395,18 @@ export function registerDataverseTools(
         tableName: z
           .string()
           .describe(
-            "The logical name of the table (e.g., 'account', 'contact')"
+            "The logical name of the table (e.g., 'account', 'contact')",
           ),
         recordId: z
           .string()
           .describe(
-            "The record_id (unique GUID identifier) of the record to retrieve (e.g., '12345678-1234-1234-1234-123456789abc'), OR the primary name value (e.g., 'Contoso Ltd'). GUID is preferred for uniqueness."
+            "The record_id (unique GUID identifier) of the record to retrieve (e.g., '12345678-1234-1234-1234-123456789abc'), OR the primary name value (e.g., 'Contoso Ltd'). GUID is preferred for uniqueness.",
           ),
         allColumns: z
           .boolean()
           .optional()
           .describe(
-            "Optional: If true, retrieve all columns; if false, retrieve only important columns (default: false)"
+            "Optional: If true, retrieve all columns; if false, retrieve only important columns (default: false)",
           ),
       },
     },
@@ -465,7 +422,7 @@ export function registerDataverseTools(
             params.tableName
           }, RecordId: ${params.recordId}, AllColumns: ${
             params.allColumns || false
-          }`
+          }`,
         );
 
         const req = contextProvider.getContext();
@@ -474,7 +431,7 @@ export function registerDataverseTools(
           params.tableName,
           params.recordId,
           req,
-          params.allColumns || false
+          params.allColumns || false,
         );
 
         const content: any[] = [
@@ -489,7 +446,7 @@ export function registerDataverseTools(
                 attributes: record,
               },
               null,
-              2
+              2,
             ),
           },
         ];
@@ -552,7 +509,7 @@ export function registerDataverseTools(
                       "Ensure the record_id is a valid GUID format (e.g., '12345678-1234-1234-1234-123456789abc').",
                   },
                   null,
-                  2
+                  2,
                 ),
               },
             ],
@@ -564,14 +521,14 @@ export function registerDataverseTools(
           error.message.includes("Configuration error")
             ? `Configuration error: ${error.message}. Please verify that the Dataverse instance URL is correctly configured.`
             : error.name === "Error" &&
-              error.message.includes("Authentication error")
-            ? `Authentication error: ${error.message}. The current user may not have permission to retrieve records from the '${params.tableName}' table.`
-            : error.message?.includes("404") ||
-              error.message?.includes("Not Found")
-            ? `Record not found: The record with record_id '${params.recordId}' does not exist in the '${params.tableName}' table, or the current user does not have permission to view it.`
-            : error.message?.includes("400")
-            ? `Bad request: Invalid table name '${params.tableName}' or malformed request. Use the 'list_tables' tool to see available tables.`
-            : `Unexpected error while retrieving record: ${error.message}. Please check the server logs for more details.`;
+                error.message.includes("Authentication error")
+              ? `Authentication error: ${error.message}. The current user may not have permission to retrieve records from the '${params.tableName}' table.`
+              : error.message?.includes("404") ||
+                  error.message?.includes("Not Found")
+                ? `Record not found: The record with record_id '${params.recordId}' does not exist in the '${params.tableName}' table, or the current user does not have permission to view it.`
+                : error.message?.includes("400")
+                  ? `Bad request: Invalid table name '${params.tableName}' or malformed request. Use the 'list_tables' tool to see available tables.`
+                  : `Unexpected error while retrieving record: ${error.message}. Please check the server logs for more details.`;
 
         return {
           content: [
@@ -589,13 +546,13 @@ export function registerDataverseTools(
                     "Use the 'search' tool to find valid record_id values, or use the 'list_tables' tool to verify the table name.",
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
         };
       }
-    }
+    },
   );
 
   server.registerTool(
@@ -607,13 +564,13 @@ export function registerDataverseTools(
         tableName: z
           .string()
           .describe(
-            "The logical name or entity set name of the table (e.g., 'account', 'contact', 'accounts')"
+            "The logical name or entity set name of the table (e.g., 'account', 'contact', 'accounts')",
           ),
         full: z
           .boolean()
           .optional()
           .describe(
-            "If true, return all attributes; if false, return only important fields based on recent data analysis (default: false)"
+            "If true, return all attributes; if false, return only important fields based on recent data analysis (default: false)",
           ),
       },
     },
@@ -623,7 +580,7 @@ export function registerDataverseTools(
         logger.info(
           `Executing DescribeTable tool for user ${userInfo} - Table: ${
             params.tableName
-          }, Full: ${params.full || false}`
+          }, Full: ${params.full || false}`,
         );
 
         const req = contextProvider.getContext();
@@ -631,7 +588,7 @@ export function registerDataverseTools(
         const description = await dataverseClient.describeTable(
           params.tableName,
           params.full || false,
-          req
+          req,
         );
 
         return {
@@ -665,7 +622,7 @@ export function registerDataverseTools(
                   mode: params.full ? "full" : "important fields only",
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -678,12 +635,12 @@ export function registerDataverseTools(
           error.message.includes("Configuration error")
             ? `Configuration error: ${error.message}. Please verify that the Dataverse instance URL is correctly configured.`
             : error.name === "Error" &&
-              error.message.includes("Authentication error")
-            ? `Authentication error: ${error.message}. The current user may not have permission to access table metadata.`
-            : error.message?.includes("does not exist") ||
-              error.message?.includes("not found")
-            ? `Table '${params.tableName}' not found. Use the 'list_tables' tool to see available tables.`
-            : `Unexpected error while describing table: ${error.message}. Please check the server logs for more details.`;
+                error.message.includes("Authentication error")
+              ? `Authentication error: ${error.message}. The current user may not have permission to access table metadata.`
+              : error.message?.includes("does not exist") ||
+                  error.message?.includes("not found")
+                ? `Table '${params.tableName}' not found. Use the 'list_tables' tool to see available tables.`
+                : `Unexpected error while describing table: ${error.message}. Please check the server logs for more details.`;
 
         return {
           content: [
@@ -700,13 +657,13 @@ export function registerDataverseTools(
                     "Use the 'list_tables' tool to verify the table name exists, or check if you have permissions to access this table.",
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
         };
       }
-    }
+    },
   );
 
   server.registerTool(
@@ -718,7 +675,7 @@ export function registerDataverseTools(
         tableName: z
           .string()
           .describe(
-            "The logical name or entity set name of the table (e.g., 'account', 'contact', 'accounts')"
+            "The logical name or entity set name of the table (e.g., 'account', 'contact', 'accounts')",
           ),
       },
     },
@@ -726,14 +683,14 @@ export function registerDataverseTools(
       try {
         const userInfo = contextProvider.getUserInfo();
         logger.info(
-          `Executing DescribeTableFormat tool for user ${userInfo} - Table: ${params.tableName}`
+          `Executing DescribeTableFormat tool for user ${userInfo} - Table: ${params.tableName}`,
         );
 
         const req = contextProvider.getContext();
         // DataverseClient.describeTableFormat now handles resolution internally
         const formatDescription = await dataverseClient.describeTableFormat(
           params.tableName,
-          req
+          req,
         );
 
         return {
@@ -777,7 +734,7 @@ export function registerDataverseTools(
                   attribute_count: formatDescription.attributes.length,
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -790,12 +747,12 @@ export function registerDataverseTools(
           error.message.includes("Configuration error")
             ? `Configuration error: ${error.message}. Please verify that the Dataverse instance URL is correctly configured.`
             : error.name === "Error" &&
-              error.message.includes("Authentication error")
-            ? `Authentication error: ${error.message}. The current user may not have permission to access table metadata.`
-            : error.message?.includes("does not exist") ||
-              error.message?.includes("not found")
-            ? `Table '${params.tableName}' not found. Use the 'list_tables' tool to see available tables.`
-            : `Unexpected error while describing table format: ${error.message}. Please check the server logs for more details.`;
+                error.message.includes("Authentication error")
+              ? `Authentication error: ${error.message}. The current user may not have permission to access table metadata.`
+              : error.message?.includes("does not exist") ||
+                  error.message?.includes("not found")
+                ? `Table '${params.tableName}' not found. Use the 'list_tables' tool to see available tables.`
+                : `Unexpected error while describing table format: ${error.message}. Please check the server logs for more details.`;
 
         return {
           content: [
@@ -812,13 +769,13 @@ export function registerDataverseTools(
                     "Use the 'list_tables' tool to verify the table name exists, or check if you have permissions to access this table.",
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
         };
       }
-    }
+    },
   );
 
   server.registerTool(
@@ -830,7 +787,7 @@ export function registerDataverseTools(
         tableName: z
           .string()
           .describe(
-            "The logical name of the table to get views for (e.g., 'account', 'contact')"
+            "The logical name of the table to get views for (e.g., 'account', 'contact')",
           ),
       },
     },
@@ -838,13 +795,13 @@ export function registerDataverseTools(
       try {
         const userInfo = contextProvider.getUserInfo();
         logger.info(
-          `Executing GetPredefinedQueries tool for user ${userInfo} - Table: ${params.tableName}`
+          `Executing GetPredefinedQueries tool for user ${userInfo} - Table: ${params.tableName}`,
         );
 
         const req = contextProvider.getContext();
         const queries = await dataverseClient.getPredefinedQueries(
           params.tableName,
-          req
+          req,
         );
 
         return {
@@ -862,7 +819,7 @@ export function registerDataverseTools(
                   count: queries.length,
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -875,12 +832,12 @@ export function registerDataverseTools(
           error.message.includes("Configuration error")
             ? `Configuration error: ${error.message}. Please verify that the Dataverse instance URL is correctly configured.`
             : error.name === "Error" &&
-              error.message.includes("Authentication error")
-            ? `Authentication error: ${error.message}. The current user may not have permission to retrieve query definitions from the '${params.tableName}' table.`
-            : error.message?.includes("does not exist") ||
-              error.message?.includes("not found")
-            ? `Table '${params.tableName}' not found. Use the 'list_tables' tool to see available tables.`
-            : `Unexpected error while retrieving predefined queries: ${error.message}. Please check the server logs for more details.`;
+                error.message.includes("Authentication error")
+              ? `Authentication error: ${error.message}. The current user may not have permission to retrieve query definitions from the '${params.tableName}' table.`
+              : error.message?.includes("does not exist") ||
+                  error.message?.includes("not found")
+                ? `Table '${params.tableName}' not found. Use the 'list_tables' tool to see available tables.`
+                : `Unexpected error while retrieving predefined queries: ${error.message}. Please check the server logs for more details.`;
 
         return {
           content: [
@@ -897,13 +854,13 @@ export function registerDataverseTools(
                     "Use the 'list_tables' tool to verify the table name exists, or check if you have permissions to access this table.",
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
         };
       }
-    }
+    },
   );
 
   server.registerTool(
@@ -915,13 +872,13 @@ export function registerDataverseTools(
         queryIdOrName: z
           .string()
           .describe(
-            "The query ID (GUID) or query name to execute. GUID is preferred for uniqueness."
+            "The query ID (GUID) or query name to execute. GUID is preferred for uniqueness.",
           ),
         tableName: z
           .string()
           .optional()
           .describe(
-            "Optional: The logical name of the table (required only when querying by name instead of ID)"
+            "Optional: The logical name of the table (required only when querying by name instead of ID)",
           ),
       },
     },
@@ -931,14 +888,14 @@ export function registerDataverseTools(
         logger.info(
           `Executing RunPredefinedQuery tool for user ${userInfo} - Query: ${
             params.queryIdOrName
-          }, Table: ${params.tableName || "auto-detect"}`
+          }, Table: ${params.tableName || "auto-detect"}`,
         );
 
         const req = contextProvider.getContext();
         const result = await dataverseClient.runPredefinedQuery(
           params.queryIdOrName,
           params.tableName,
-          req
+          req,
         );
 
         return {
@@ -957,7 +914,7 @@ export function registerDataverseTools(
                   })),
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -970,17 +927,17 @@ export function registerDataverseTools(
           error.message.includes("Configuration error")
             ? `Configuration error: ${error.message}. Please verify that the Dataverse instance URL is correctly configured.`
             : error.name === "Error" &&
-              error.message.includes("Authentication error")
-            ? `Authentication error: ${error.message}. The current user may not have permission to execute queries.`
-            : error.message?.includes("not found")
-            ? `Query '${params.queryIdOrName}' not found. ${
-                params.tableName
-                  ? `Ensure the query exists for table '${params.tableName}'.`
-                  : "Provide the tableName parameter if querying by name."
-              }`
-            : error.message?.includes("Table name is required")
-            ? `Table name is required when querying by name instead of ID. Please provide the 'tableName' parameter.`
-            : `Unexpected error while running predefined query: ${error.message}. Please check the server logs for more details.`;
+                error.message.includes("Authentication error")
+              ? `Authentication error: ${error.message}. The current user may not have permission to execute queries.`
+              : error.message?.includes("not found")
+                ? `Query '${params.queryIdOrName}' not found. ${
+                    params.tableName
+                      ? `Ensure the query exists for table '${params.tableName}'.`
+                      : "Provide the tableName parameter if querying by name."
+                  }`
+                : error.message?.includes("Table name is required")
+                  ? `Table name is required when querying by name instead of ID. Please provide the 'tableName' parameter.`
+                  : `Unexpected error while running predefined query: ${error.message}. Please check the server logs for more details.`;
 
         return {
           content: [
@@ -998,13 +955,13 @@ export function registerDataverseTools(
                     "Use the 'get_predefined_queries' tool to discover available queries and their IDs.",
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
         };
       }
-    }
+    },
   );
 
   server.registerTool(
@@ -1016,13 +973,13 @@ export function registerDataverseTools(
         fetchXml: z
           .string()
           .describe(
-            "The FetchXML query to execute. Must be valid FetchXML with correct entity and attribute names."
+            "The FetchXML query to execute. Must be valid FetchXML with correct entity and attribute names.",
           ),
         tableName: z
           .string()
           .optional()
           .describe(
-            "Optional: The logical name of the table (if not specified in the FetchXML <entity> tag)"
+            "Optional: The logical name of the table (if not specified in the FetchXML <entity> tag)",
           ),
       },
     },
@@ -1032,14 +989,14 @@ export function registerDataverseTools(
         logger.info(
           `Executing RunCustomQuery tool for user ${userInfo} - Table: ${
             params.tableName || "from FetchXML"
-          }`
+          }`,
         );
 
         const req = contextProvider.getContext();
         const result = await dataverseClient.runCustomQuery(
           params.fetchXml,
           params.tableName,
-          req
+          req,
         );
 
         return {
@@ -1057,7 +1014,7 @@ export function registerDataverseTools(
                   })),
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -1070,7 +1027,7 @@ export function registerDataverseTools(
         if (error.message?.includes("Dataverse API request failed")) {
           // Try to parse the error response from Dataverse
           const errorMatch = error.message.match(
-            /Dataverse API request failed with status (\d+): (.+)/
+            /Dataverse API request failed with status (\d+): (.+)/,
           );
           if (errorMatch) {
             try {
@@ -1089,16 +1046,16 @@ export function registerDataverseTools(
           error.message.includes("Configuration error")
             ? `Configuration error: ${error.message}. Please verify that the Dataverse instance URL is correctly configured.`
             : error.name === "Error" &&
-              error.message.includes("Authentication error")
-            ? `Authentication error: ${error.message}. The current user may not have permission to execute queries.`
-            : error.message?.includes("Invalid FetchXML")
-            ? `Invalid FetchXML query: ${error.message}`
-            : error.message?.includes("Could not determine table name")
-            ? `Could not determine table name from FetchXML. Please provide the 'tableName' parameter or include an <entity name="..."> tag in your FetchXML.`
-            : error.message?.includes("does not exist") ||
-              error.message?.includes("not found")
-            ? `Entity or attribute not found: ${error.message}. Verify all entity and attribute names in your FetchXML are correct.`
-            : `Unexpected error executing FetchXML query: ${error.message}. Please check the server logs for more details.`;
+                error.message.includes("Authentication error")
+              ? `Authentication error: ${error.message}. The current user may not have permission to execute queries.`
+              : error.message?.includes("Invalid FetchXML")
+                ? `Invalid FetchXML query: ${error.message}`
+                : error.message?.includes("Could not determine table name")
+                  ? `Could not determine table name from FetchXML. Please provide the 'tableName' parameter or include an <entity name="..."> tag in your FetchXML.`
+                  : error.message?.includes("does not exist") ||
+                      error.message?.includes("not found")
+                    ? `Entity or attribute not found: ${error.message}. Verify all entity and attribute names in your FetchXML are correct.`
+                    : `Unexpected error executing FetchXML query: ${error.message}. Please check the server logs for more details.`;
 
         const responseContent: any = {
           error: true,
@@ -1124,7 +1081,7 @@ export function registerDataverseTools(
           ],
         };
       }
-    }
+    },
   );
 
   server.registerTool(
@@ -1147,7 +1104,7 @@ export function registerDataverseTools(
         const { table, data } = params;
         const userInfo = contextProvider.getUserInfo();
         logger.info(
-          `Executing CreateRecord tool for user ${userInfo} on table ${table}`
+          `Executing CreateRecord tool for user ${userInfo} on table ${table}`,
         );
 
         const req = contextProvider.getContext();
@@ -1179,7 +1136,7 @@ export function registerDataverseTools(
           ],
         };
       }
-    }
+    },
   );
 
   server.registerTool(
@@ -1196,7 +1153,7 @@ export function registerDataverseTools(
           .object({})
           .passthrough()
           .describe(
-            "A JSON object containing the data to update on the record."
+            "A JSON object containing the data to update on the record.",
           ),
       }),
     },
@@ -1205,7 +1162,7 @@ export function registerDataverseTools(
         const { table, record_id, data } = params;
         const userInfo = contextProvider.getUserInfo();
         logger.info(
-          `Executing UpdateRecord tool for user ${userInfo} on table ${table} and record ${record_id}`
+          `Executing UpdateRecord tool for user ${userInfo} on table ${table} and record ${record_id}`,
         );
 
         const req = contextProvider.getContext();
@@ -1237,6 +1194,6 @@ export function registerDataverseTools(
           ],
         };
       }
-    }
+    },
   );
 }
