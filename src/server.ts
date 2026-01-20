@@ -1,3 +1,7 @@
+// Initialize Application Insights FIRST before other imports to ensure all telemetry is captured
+import { appInsightsService } from "./services/telemetry/ApplicationInsightsService.js";
+appInsightsService.initialize();
+
 import express, { Request, Response, NextFunction } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
