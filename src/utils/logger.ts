@@ -7,6 +7,11 @@
  * captured and sent to Azure Monitor via the setAutoCollectConsole feature.
  */
 
+import {
+  appInsightsService,
+  TelemetryProperties,
+} from "../services/telemetry/ApplicationInsightsService.js";
+
 export enum LogMode {
   STDIO = "stdio",
   HTTP = "http",
@@ -158,6 +163,39 @@ class Logger {
    */
   debugWithProperties(message: string, properties: LogProperties): void {
     this.debug(this.formatMessage(message, properties));
+  }
+
+  /**
+   * Log an error and track it in Application Insights as an exception.
+   * Use this method for all errors that should be tracked in App Insights.
+   * @param message - A descriptive message about the error context
+   * @param error - The error object to log and track
+   * @param properties - Optional structured properties for telemetry
+   */
+  exception(
+    message: string,
+    error: Error | unknown,
+    properties?: LogProperties,
+  ): void {
+    // Convert unknown errors to Error objects
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+
+    // Log to console (for local debugging and OpenTelemetry auto-collection)
+    this.error(`${message}: ${errorObj.message}`, errorObj);
+
+    // Convert LogProperties to TelemetryProperties (string values only)
+    const telemetryProps: TelemetryProperties = {};
+    if (properties) {
+      for (const [key, value] of Object.entries(properties)) {
+        if (value !== undefined) {
+          telemetryProps[key] = String(value);
+        }
+      }
+    }
+    telemetryProps["errorContext"] = message;
+
+    // Track in Application Insights
+    appInsightsService.trackException(errorObj, telemetryProps);
   }
 }
 

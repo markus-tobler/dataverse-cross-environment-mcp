@@ -84,6 +84,9 @@ export interface AttributeMetadata {
     }>;
   };
   Targets?: string[];
+  // Properties to identify computed/virtual/logical attributes
+  AttributeOf?: string | null; // If set, this is a computed attribute of another attribute
+  IsLogical?: boolean; // Indicates if this is a logical attribute (stored in different table)
 }
 
 /**
