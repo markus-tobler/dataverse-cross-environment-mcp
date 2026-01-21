@@ -22,7 +22,7 @@ export class MetadataService {
 
   async resolveLogicalName(
     service: DataverseWebApiService,
-    tableOrSetName: string
+    tableOrSetName: string,
   ): Promise<string> {
     const dataverseUrl = service.getDataverseUrl();
 
@@ -33,7 +33,7 @@ export class MetadataService {
     const logicalNameFromSet =
       MetadataService.metadataCache.getReverseEntitySetName(
         dataverseUrl,
-        tableOrSetName
+        tableOrSetName,
       );
     if (logicalNameFromSet) {
       // tableOrSetName is an entity set name, return the resolved logical name
@@ -43,7 +43,7 @@ export class MetadataService {
     // Check if this is a logical name (singular form) with a known entity set mapping
     const cachedEntitySetName = MetadataService.metadataCache.getEntitySetName(
       dataverseUrl,
-      tableOrSetName
+      tableOrSetName,
     );
     if (cachedEntitySetName) {
       // tableOrSetName is already a logical name
@@ -98,7 +98,7 @@ export class MetadataService {
       const response = await service.sendRequestString(
         accessToken,
         "GET",
-        `EntityDefinitions?$select=LogicalName,DisplayName,EntitySetName,Description&$filter=IsValidForAdvancedFind eq true and (${filter})`
+        `EntityDefinitions?$select=LogicalName,DisplayName,EntitySetName,Description&$filter=IsValidForAdvancedFind eq true and (${filter})`,
       );
 
       const data = JSON.parse(response);
@@ -116,7 +116,7 @@ export class MetadataService {
             MetadataService.metadataCache.setEntitySetNameBidirectional(
               dataverseUrl,
               logicalName,
-              collectionName
+              collectionName,
             );
           }
 
@@ -144,13 +144,13 @@ export class MetadataService {
   async describeTable(
     service: DataverseWebApiService,
     logicalName: string,
-    full: boolean = false
+    full: boolean = false,
   ): Promise<TableDescription> {
     const dataverseUrl = service.getDataverseUrl();
     const cachedDescription = MetadataService.metadataCache.getTableDescription(
       dataverseUrl,
       logicalName,
-      full
+      full,
     );
     if (cachedDescription) {
       return cachedDescription;
@@ -161,7 +161,7 @@ export class MetadataService {
     const metadataResponse = await service.sendRequestString(
       accessToken,
       "GET",
-      `EntityDefinitions(LogicalName='${logicalName}')?$select=LogicalName,DisplayName,Description,PrimaryIdAttribute,PrimaryNameAttribute&$expand=Attributes`
+      `EntityDefinitions(LogicalName='${logicalName}')?$select=LogicalName,DisplayName,Description,PrimaryIdAttribute,PrimaryNameAttribute&$expand=Attributes`,
     );
 
     const entityMetadata = JSON.parse(metadataResponse);
@@ -172,7 +172,7 @@ export class MetadataService {
         entitySetName,
         attributes,
         service,
-        accessToken
+        accessToken,
       );
     }
 
@@ -183,7 +183,7 @@ export class MetadataService {
             attr.IsValidForRead &&
             (importantFields.includes(attr.LogicalName) ||
               attr.IsPrimaryId ||
-              attr.IsPrimaryName)
+              attr.IsPrimaryName),
         );
 
     const attributeDescriptions: AttributeDescription[] =
@@ -210,7 +210,7 @@ export class MetadataService {
       dataverseUrl,
       logicalName,
       description,
-      full
+      full,
     );
 
     return description;
@@ -220,18 +220,18 @@ export class MetadataService {
     entitySetName: string,
     attributes: AttributeMetadata[],
     service: DataverseWebApiService,
-    accessToken: string
+    accessToken: string,
   ): Promise<string[]> {
     try {
       const modifiedOnAttr = attributes.find(
-        (a) => a.LogicalName === "modifiedon"
+        (a) => a.LogicalName === "modifiedon",
       );
       const orderBy = modifiedOnAttr ? "$orderby=modifiedon desc" : "";
 
       const response = await service.sendRequestString(
         accessToken,
         "GET",
-        `${entitySetName}?$top=50&${orderBy}`
+        `${entitySetName}?$top=50&${orderBy}`,
       );
 
       const data = JSON.parse(response);
@@ -241,17 +241,74 @@ export class MetadataService {
         return this.getImportantFieldsFromMetadata(attributes);
       }
 
+      // Debug: Log attributes that appear in records but might be computed
+      logger.debug(
+        `Found ${records.length} records for sampling. First record has ${Object.keys(records[0] || {}).length} properties`,
+      );
+
+      // Build a map of valid selectable attributes from metadata
+      // These are the ONLY attributes we'll consider for scoring
+      const selectableAttributes = new Map<string, AttributeMetadata>();
+      for (const attr of attributes) {
+        // Skip attributes that are not readable or internal/virtual
+        if (!attr.IsValidForRead || attr.LogicalName.startsWith("_")) {
+          continue;
+        }
+
+        // Skip virtual annotation properties
+        if (this.isVirtualAnnotationProperty(attr, entitySetName)) {
+          continue;
+        }
+
+        // Skip computed/logical attributes identified by metadata properties
+        const hasAttributeOf =
+          attr.AttributeOf !== undefined && attr.AttributeOf !== null;
+        const isLogical = attr.IsLogical === true;
+
+        // Skip read-only computed attributes (can't create or update)
+        // These are typically computed values like rollups, calculated fields, etc.
+        const isReadOnlyComputed =
+          attr.IsValidForCreate === false && attr.IsValidForUpdate === false;
+
+        if (hasAttributeOf || isLogical || isReadOnlyComputed) {
+          logger.debug(
+            `Excluding computed/logical/read-only attribute: ${attr.LogicalName} (AttributeOf=${attr.AttributeOf}, IsLogical=${attr.IsLogical}, Create=${attr.IsValidForCreate}, Update=${attr.IsValidForUpdate})`,
+          );
+          continue;
+        }
+
+        selectableAttributes.set(attr.LogicalName, attr);
+      }
+
+      logger.debug(
+        `Metadata contains ${attributes.length} attributes, ${selectableAttributes.size} are selectable`,
+      );
+
+      // Check for fields in records that aren't in selectable metadata (these are computed)
+      if (records.length > 0) {
+        const firstRecord = records[0];
+        const recordKeys = Object.keys(firstRecord).filter(
+          (key) =>
+            !key.startsWith("@") &&
+            !key.startsWith("_") &&
+            !key.endsWith("@OData.Community.Display.V1.FormattedValue"),
+        );
+
+        const computedFields = recordKeys.filter(
+          (key) => !selectableAttributes.has(key),
+        );
+
+        if (computedFields.length > 0) {
+          logger.debug(
+            `Found ${computedFields.length} computed fields in records (not in selectable metadata): ${computedFields.join(", ")}`,
+          );
+        }
+      }
+
       const fieldScores: Map<string, FieldImportance> = new Map();
 
-      for (const attr of attributes) {
-        // Skip attributes that are not readable, internal (_prefix), or virtual annotation properties
-        if (
-          !attr.IsValidForRead ||
-          attr.LogicalName.startsWith("_") ||
-          this.isVirtualAnnotationProperty(attr, entitySetName)
-        )
-          continue;
-
+      // Only score attributes that are in our selectable set
+      for (const [logicalName, attr] of selectableAttributes) {
         let score = 0;
         const reasons: string[] = [];
 
@@ -273,7 +330,7 @@ export class MetadataService {
         }
 
         const nonNullCount = records.filter(
-          (r: any) => r[attr.LogicalName] != null && r[attr.LogicalName] !== ""
+          (r: any) => r[attr.LogicalName] != null && r[attr.LogicalName] !== "",
         ).length;
         const fillRate = nonNullCount / records.length;
 
@@ -297,8 +354,8 @@ export class MetadataService {
         }
 
         if (score > 0) {
-          fieldScores.set(attr.LogicalName, {
-            logicalName: attr.LogicalName,
+          fieldScores.set(logicalName, {
+            logicalName: logicalName,
             score,
             reason: reasons.join(", "),
           });
@@ -317,13 +374,22 @@ export class MetadataService {
   }
 
   private getImportantFieldsFromMetadata(
-    attributes: AttributeMetadata[]
+    attributes: AttributeMetadata[],
   ): string[] {
     const important = attributes
-      .filter(
-        (attr) =>
+      .filter((attr) => {
+        const hasAttributeOf =
+          attr.AttributeOf !== undefined && attr.AttributeOf !== null;
+        const isLogical = attr.IsLogical === true;
+        const isReadOnlyComputed =
+          attr.IsValidForCreate === false && attr.IsValidForUpdate === false;
+
+        return (
           attr.IsValidForRead &&
           !this.isVirtualAnnotationProperty(attr) &&
+          !hasAttributeOf &&
+          !isLogical &&
+          !isReadOnlyComputed &&
           (attr.IsPrimaryId ||
             attr.IsPrimaryName ||
             attr.RequiredLevel?.Value === "ApplicationRequired" ||
@@ -332,7 +398,8 @@ export class MetadataService {
             attr.LogicalName.includes("email") ||
             attr.LogicalName === "statecode" ||
             attr.LogicalName === "statuscode")
-      )
+        );
+      })
       .slice(0, 15);
 
     return important.map((a) => a.LogicalName);
@@ -340,7 +407,7 @@ export class MetadataService {
 
   private isVirtualAnnotationProperty(
     attr: AttributeMetadata,
-    primaryNameAttribute?: string
+    primaryNameAttribute?: string,
   ): boolean {
     const name = attr.LogicalName;
 
@@ -364,7 +431,7 @@ export class MetadataService {
 
   private convertToODataSelectColumns(
     logicalNames: string[],
-    allAttributes: AttributeMetadata[]
+    allAttributes: AttributeMetadata[],
   ): string[] {
     const result: string[] = [];
 
@@ -396,7 +463,7 @@ export class MetadataService {
   }
 
   private createAttributeDescription(
-    attr: AttributeMetadata
+    attr: AttributeMetadata,
   ): AttributeDescription {
     const displayName =
       attr.DisplayName?.UserLocalizedLabel?.Label || attr.LogicalName;
@@ -512,7 +579,7 @@ export class MetadataService {
 
   async getImportantColumnsForTable(
     service: DataverseWebApiService,
-    tableName: string
+    tableName: string,
   ): Promise<string[]> {
     const logicalName = await this.resolveLogicalName(service, tableName);
     const dataverseUrl = service.getDataverseUrl();
@@ -526,39 +593,39 @@ export class MetadataService {
         const description = await this.describeTable(
           service,
           logicalName,
-          false
+          false,
         );
         const logicalNames = description.attributes.map(
-          (attr) => attr.logicalName
+          (attr) => attr.logicalName,
         );
         const accessToken = await service.getAccessTokenFunc()();
         const metadataResponse = await service.sendRequestString(
           accessToken,
           "GET",
-          `EntityDefinitions(LogicalName='${logicalName}')?$select=LogicalName&$expand=Attributes`
+          `EntityDefinitions(LogicalName='${logicalName}')?$select=LogicalName&$expand=Attributes`,
         );
         const entityMetadata = JSON.parse(metadataResponse);
         const allAttributes: AttributeMetadata[] =
           entityMetadata.Attributes || [];
         const converted = this.convertToODataSelectColumns(
           logicalNames,
-          allAttributes
+          allAttributes,
         );
         return converted;
-      }
+      },
     );
   }
 
   async getEntitySetName(
     service: DataverseWebApiService,
-    tableName: string
+    tableName: string,
   ): Promise<string> {
     const dataverseUrl = service.getDataverseUrl();
     MetadataService.metadataCache.ensureSystemEntities(dataverseUrl);
 
     const reverseMatch = MetadataService.metadataCache.getReverseEntitySetName(
       dataverseUrl,
-      tableName
+      tableName,
     );
     if (reverseMatch) {
       return reverseMatch;
@@ -566,7 +633,7 @@ export class MetadataService {
 
     const cachedEntitySetName = MetadataService.metadataCache.getEntitySetName(
       dataverseUrl,
-      tableName
+      tableName,
     );
     if (cachedEntitySetName) {
       return cachedEntitySetName;
@@ -577,7 +644,7 @@ export class MetadataService {
     const reverseEntitySetName =
       MetadataService.metadataCache.getReverseEntitySetName(
         dataverseUrl,
-        tableName
+        tableName,
       );
     if (reverseEntitySetName) {
       return reverseEntitySetName;
@@ -585,7 +652,7 @@ export class MetadataService {
 
     const entitySetName = MetadataService.metadataCache.getEntitySetName(
       dataverseUrl,
-      tableName
+      tableName,
     );
     if (entitySetName) {
       return entitySetName;
@@ -598,7 +665,7 @@ export class MetadataService {
       const response = await service.sendRequestString(
         accessToken,
         "GET",
-        `EntityDefinitions(LogicalName='${tableName}')?$select=LogicalName,EntitySetName`
+        `EntityDefinitions(LogicalName='${tableName}')?$select=LogicalName,EntitySetName`,
       );
       const entityData = JSON.parse(response);
 
@@ -607,14 +674,14 @@ export class MetadataService {
         MetadataService.metadataCache.setEntitySetNameBidirectional(
           dataverseUrl,
           tableName,
-          entityData.EntitySetName
+          entityData.EntitySetName,
         );
         return entityData.EntitySetName;
       }
     } catch (error: any) {
       // If entity doesn't exist or can't be accessed, fall through to error
       logger.debug(
-        `Could not retrieve EntitySetName for ${tableName}: ${error.message}`
+        `Could not retrieve EntitySetName for ${tableName}: ${error.message}`,
       );
     }
 
@@ -622,7 +689,7 @@ export class MetadataService {
   }
 
   private async getReadableEntityNames(
-    service: DataverseWebApiService
+    service: DataverseWebApiService,
   ): Promise<Set<string>> {
     const dataverseUrl = service.getDataverseUrl();
     const userId = service.getUserId();
@@ -633,7 +700,7 @@ export class MetadataService {
 
     const cached = MetadataService.metadataCache.getReadableEntityNames(
       dataverseUrl,
-      userId
+      userId,
     );
     if (cached) {
       return cached;
@@ -643,7 +710,7 @@ export class MetadataService {
     const response = await service.sendRequestString(
       accessToken,
       "GET",
-      `systemusers(${userId})/Microsoft.Dynamics.CRM.RetrieveUserPrivileges`
+      `systemusers(${userId})/Microsoft.Dynamics.CRM.RetrieveUserPrivileges`,
     );
 
     const data = JSON.parse(response);
@@ -662,7 +729,7 @@ export class MetadataService {
     MetadataService.metadataCache.setReadableEntityNames(
       dataverseUrl,
       userId,
-      readableEntityNames
+      readableEntityNames,
     );
     return readableEntityNames;
   }
@@ -679,7 +746,7 @@ export class MetadataService {
    */
   async describeTableFormat(
     service: DataverseWebApiService,
-    logicalName: string
+    logicalName: string,
   ): Promise<TableFormatDescription> {
     const dataverseUrl = service.getDataverseUrl();
 
@@ -687,7 +754,7 @@ export class MetadataService {
     const cachedDescription =
       MetadataService.metadataCache.getTableFormatDescription(
         dataverseUrl,
-        logicalName
+        logicalName,
       );
     if (cachedDescription) {
       return cachedDescription;
@@ -699,7 +766,7 @@ export class MetadataService {
     const metadataResponse = await service.sendRequestString(
       accessToken,
       "GET",
-      `EntityDefinitions(LogicalName='${logicalName}')?$select=LogicalName,DisplayName,Description,PrimaryIdAttribute,PrimaryNameAttribute&$expand=Attributes`
+      `EntityDefinitions(LogicalName='${logicalName}')?$select=LogicalName,DisplayName,Description,PrimaryIdAttribute,PrimaryNameAttribute&$expand=Attributes`,
     );
 
     const entityMetadata = JSON.parse(metadataResponse);
@@ -708,19 +775,19 @@ export class MetadataService {
     // For picklist and multi-select picklist attributes, we need to fetch OptionSet details separately
     // because the basic Attributes expansion doesn't include full OptionSet metadata
     const regularPicklistAttributes = attributes.filter(
-      (attr) => attr.AttributeTypeName?.Value === "PicklistType"
+      (attr) => attr.AttributeTypeName?.Value === "PicklistType",
     );
 
     const stateAttributes = attributes.filter(
-      (attr) => attr.AttributeTypeName?.Value === "StateType"
+      (attr) => attr.AttributeTypeName?.Value === "StateType",
     );
 
     const statusAttributes = attributes.filter(
-      (attr) => attr.AttributeTypeName?.Value === "StatusType"
+      (attr) => attr.AttributeTypeName?.Value === "StatusType",
     );
 
     const multiSelectPicklistAttributes = attributes.filter(
-      (attr) => attr.AttributeTypeName?.Value === "MultiSelectPicklistType"
+      (attr) => attr.AttributeTypeName?.Value === "MultiSelectPicklistType",
     );
 
     // Fetch full metadata for regular picklist attributes including OptionSet
@@ -729,13 +796,13 @@ export class MetadataService {
         const picklistResponse = await service.sendRequestString(
           accessToken,
           "GET",
-          `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${picklistAttr.LogicalName}')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet`
+          `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${picklistAttr.LogicalName}')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet`,
         );
         const picklistData = JSON.parse(picklistResponse);
 
         // Merge the OptionSet data into the attribute
         const attrIndex = attributes.findIndex(
-          (a) => a.LogicalName === picklistAttr.LogicalName
+          (a) => a.LogicalName === picklistAttr.LogicalName,
         );
         if (attrIndex !== -1) {
           attributes[attrIndex].OptionSet =
@@ -744,7 +811,7 @@ export class MetadataService {
       } catch (error) {
         logger.warn(
           `Could not fetch OptionSet metadata for ${picklistAttr.LogicalName}:`,
-          error
+          error,
         );
       }
     }
@@ -755,12 +822,12 @@ export class MetadataService {
         const stateResponse = await service.sendRequestString(
           accessToken,
           "GET",
-          `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${stateAttr.LogicalName}')/Microsoft.Dynamics.CRM.StateAttributeMetadata?$select=LogicalName&$expand=OptionSet`
+          `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${stateAttr.LogicalName}')/Microsoft.Dynamics.CRM.StateAttributeMetadata?$select=LogicalName&$expand=OptionSet`,
         );
         const stateData = JSON.parse(stateResponse);
 
         const attrIndex = attributes.findIndex(
-          (a) => a.LogicalName === stateAttr.LogicalName
+          (a) => a.LogicalName === stateAttr.LogicalName,
         );
         if (attrIndex !== -1) {
           attributes[attrIndex].OptionSet = stateData.OptionSet;
@@ -768,7 +835,7 @@ export class MetadataService {
       } catch (error) {
         logger.warn(
           `Could not fetch OptionSet metadata for ${stateAttr.LogicalName}:`,
-          error
+          error,
         );
       }
     }
@@ -779,12 +846,12 @@ export class MetadataService {
         const statusResponse = await service.sendRequestString(
           accessToken,
           "GET",
-          `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${statusAttr.LogicalName}')/Microsoft.Dynamics.CRM.StatusAttributeMetadata?$select=LogicalName&$expand=OptionSet`
+          `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${statusAttr.LogicalName}')/Microsoft.Dynamics.CRM.StatusAttributeMetadata?$select=LogicalName&$expand=OptionSet`,
         );
         const statusData = JSON.parse(statusResponse);
 
         const attrIndex = attributes.findIndex(
-          (a) => a.LogicalName === statusAttr.LogicalName
+          (a) => a.LogicalName === statusAttr.LogicalName,
         );
         if (attrIndex !== -1) {
           attributes[attrIndex].OptionSet = statusData.OptionSet;
@@ -792,7 +859,7 @@ export class MetadataService {
       } catch (error) {
         logger.warn(
           `Could not fetch OptionSet metadata for ${statusAttr.LogicalName}:`,
-          error
+          error,
         );
       }
     }
@@ -803,13 +870,13 @@ export class MetadataService {
         const multiSelectResponse = await service.sendRequestString(
           accessToken,
           "GET",
-          `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${multiSelectAttr.LogicalName}')/Microsoft.Dynamics.CRM.MultiSelectPicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet`
+          `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${multiSelectAttr.LogicalName}')/Microsoft.Dynamics.CRM.MultiSelectPicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet`,
         );
         const multiSelectData = JSON.parse(multiSelectResponse);
 
         // Merge the OptionSet data into the attribute
         const attrIndex = attributes.findIndex(
-          (a) => a.LogicalName === multiSelectAttr.LogicalName
+          (a) => a.LogicalName === multiSelectAttr.LogicalName,
         );
         if (attrIndex !== -1) {
           attributes[attrIndex].OptionSet =
@@ -818,14 +885,14 @@ export class MetadataService {
       } catch (error) {
         logger.warn(
           `Could not fetch OptionSet metadata for ${multiSelectAttr.LogicalName}:`,
-          error
+          error,
         );
       }
     }
 
     // Fetch full metadata for boolean attributes to get their option labels
     const booleanAttributes = attributes.filter(
-      (attr) => attr.AttributeTypeName?.Value === "BooleanType"
+      (attr) => attr.AttributeTypeName?.Value === "BooleanType",
     );
 
     for (const boolAttr of booleanAttributes) {
@@ -833,12 +900,12 @@ export class MetadataService {
         const boolResponse = await service.sendRequestString(
           accessToken,
           "GET",
-          `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${boolAttr.LogicalName}')/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet`
+          `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${boolAttr.LogicalName}')/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet`,
         );
         const boolData = JSON.parse(boolResponse);
 
         const attrIndex = attributes.findIndex(
-          (a) => a.LogicalName === boolAttr.LogicalName
+          (a) => a.LogicalName === boolAttr.LogicalName,
         );
         if (attrIndex !== -1) {
           attributes[attrIndex].OptionSet = boolData.OptionSet;
@@ -846,14 +913,14 @@ export class MetadataService {
       } catch (error) {
         logger.warn(
           `Could not fetch OptionSet metadata for boolean ${boolAttr.LogicalName}:`,
-          error
+          error,
         );
       }
     }
 
     // Filter to attributes that can be created or updated
     const creatableAttributes = attributes.filter(
-      (attr) => attr.IsValidForCreate || attr.IsValidForUpdate
+      (attr) => attr.IsValidForCreate || attr.IsValidForUpdate,
     );
 
     // Create detailed attribute descriptions
@@ -863,7 +930,7 @@ export class MetadataService {
       const formatDesc = await this.createAttributeFormatDescription(
         attr,
         service,
-        accessToken
+        accessToken,
       );
       attributeFormatDescriptions.push(formatDesc);
     }
@@ -879,7 +946,7 @@ export class MetadataService {
       entityMetadata.DisplayName?.UserLocalizedLabel?.Label ||
         entityMetadata.LogicalName,
       requiredAttributes,
-      attributeFormatDescriptions
+      attributeFormatDescriptions,
     );
 
     const formatDescription: TableFormatDescription = {
@@ -899,7 +966,7 @@ export class MetadataService {
     MetadataService.metadataCache.setTableFormatDescription(
       dataverseUrl,
       logicalName,
-      formatDescription
+      formatDescription,
     );
 
     return formatDescription;
@@ -911,7 +978,7 @@ export class MetadataService {
   private async createAttributeFormatDescription(
     attr: AttributeMetadata,
     service: DataverseWebApiService,
-    accessToken: string
+    accessToken: string,
   ): Promise<AttributeFormatDescription> {
     const displayName =
       attr.DisplayName?.UserLocalizedLabel?.Label || attr.LogicalName;
@@ -948,7 +1015,7 @@ export class MetadataService {
             : ""
         }.`;
         exampleValues.push(
-          '"This is a longer text that can span multiple lines..."'
+          '"This is a longer text that can span multiple lines..."',
         );
         break;
 
@@ -1026,7 +1093,7 @@ export class MetadataService {
         }`;
         exampleValues.push(
           `"${new Date().toISOString()}"`,
-          '"2024-12-13T10:30:00Z"'
+          '"2024-12-13T10:30:00Z"',
         );
         break;
 
@@ -1055,7 +1122,7 @@ export class MetadataService {
             .join(", ")}). Use integer values for best reliability.`;
           exampleValues.push(
             options[0].value.toString(),
-            `"${options[0].label}"`
+            `"${options[0].label}"`,
           );
         } else {
           formatGuidance =
@@ -1085,7 +1152,7 @@ export class MetadataService {
             .join(", ")}. Use integer values for best reliability.`;
           exampleValues.push(
             `"${options[0].value},${options[1]?.value || options[0].value}"`,
-            `"${options[0].label}"`
+            `"${options[0].label}"`,
           );
         } else {
           formatGuidance =
@@ -1107,7 +1174,7 @@ export class MetadataService {
               const targetMetadata = await service.sendRequestString(
                 accessToken,
                 "GET",
-                `EntityDefinitions(LogicalName='${targetEntity}')?$select=LogicalName,DisplayName,PrimaryIdAttribute,PrimaryNameAttribute`
+                `EntityDefinitions(LogicalName='${targetEntity}')?$select=LogicalName,DisplayName,PrimaryIdAttribute,PrimaryNameAttribute`,
               );
               const targetData = JSON.parse(targetMetadata);
 
@@ -1122,7 +1189,7 @@ export class MetadataService {
             } catch (error) {
               logger.warn(
                 `Could not fetch metadata for lookup target ${targetEntity}:`,
-                error
+                error,
               );
             }
           }
@@ -1158,7 +1225,7 @@ export class MetadataService {
           exampleValues.push(
             `"${attr.Targets[0]}s(00000000-0000-0000-0000-000000000000)"`,
             `"${attr.Targets[0]}=00000000-0000-0000-0000-000000000000"`,
-            '"Sample Record Name"'
+            '"Sample Record Name"',
           );
         } else {
           formatGuidance =
@@ -1223,7 +1290,7 @@ export class MetadataService {
     logicalName: string,
     displayName: string,
     requiredAttributes: string[],
-    attributes: AttributeFormatDescription[]
+    attributes: AttributeFormatDescription[],
   ): string {
     const requiredFieldsList =
       requiredAttributes.length > 0
