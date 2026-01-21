@@ -82,67 +82,132 @@ export class DataverseWebApiService {
     body?: any,
   ): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
+    const startTime = Date.now();
+
+    // Log incoming request
+    logger.debug(`[Dataverse API] ${method} ${path}`, {
+      method,
+      path,
+      hasBody: !!body,
+      bodyKeys: body ? Object.keys(body).join(", ") : "none",
+    });
+
+    // Log full body at debug level if needed
+    if (body && process.env.LOG_LEVEL === "DEBUG") {
+      logger.debug(
+        `[Dataverse API] Request body: ${JSON.stringify(body, null, 2)}`,
+      );
+    }
 
     for (let attempt = 0; attempt <= this.config.maxRetries!; attempt++) {
-      const accessToken = await this.config.getAccessToken();
+      try {
+        const accessToken = await this.config.getAccessToken();
 
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${accessToken}`,
-        "OData-MaxVersion": "4.0",
-        "OData-Version": "4.0",
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      };
+        const headers: Record<string, string> = {
+          Authorization: `Bearer ${accessToken}`,
+          "OData-MaxVersion": "4.0",
+          "OData-Version": "4.0",
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        };
 
-      // Add session token for GET requests (elastic tables strong consistency)
-      if (this.sessionToken && method === "GET") {
-        headers["MSCRM.SessionToken"] = this.sessionToken;
-      }
-
-      const options: RequestInit = {
-        method,
-        headers,
-        signal: AbortSignal.timeout(this.config.timeoutInSeconds! * 1000),
-      };
-
-      if (body) {
-        options.body = JSON.stringify(body);
-      }
-
-      const response = await fetch(url, options);
-
-      // Capture session token if present
-      const sessionToken = response.headers.get("x-ms-session-token");
-      if (sessionToken) {
-        this.sessionToken = sessionToken;
-      }
-
-      // Handle 429 (Too Many Requests) with retry
-      if (response.status === 429) {
-        if (attempt === this.config.maxRetries) {
-          throw new Error("Rate limit exceeded after maximum retries");
+        // Add session token for GET requests (elastic tables strong consistency)
+        if (this.sessionToken && method === "GET") {
+          headers["MSCRM.SessionToken"] = this.sessionToken;
         }
-        const retryAfter = response.headers.get("Retry-After");
-        const waitTime = retryAfter
-          ? parseInt(retryAfter, 10) * 1000
-          : Math.pow(2, attempt) * 1000;
 
-        logger.warn(
-          `Rate limited (429). Retrying after ${waitTime / 1000} seconds...`,
+        const options: RequestInit = {
+          method,
+          headers,
+          signal: AbortSignal.timeout(this.config.timeoutInSeconds! * 1000),
+        };
+
+        if (body) {
+          options.body = JSON.stringify(body);
+        }
+
+        const response = await fetch(url, options);
+        const duration = Date.now() - startTime;
+
+        // Capture session token if present
+        const sessionToken = response.headers.get("x-ms-session-token");
+        if (sessionToken) {
+          this.sessionToken = sessionToken;
+        }
+
+        // Log response
+        logger.info(
+          `[Dataverse API] ${method} ${path} - ${response.status} (${duration}ms)`,
+          {
+            method,
+            path,
+            status: response.status,
+            duration,
+            attempt: attempt + 1,
+          },
         );
-        await this.sleep(waitTime);
-        continue;
-      }
 
-      // Handle other HTTP errors (no retry)
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          `Dataverse API request failed with status ${response.status}: ${errorText}`,
+        // Track in Application Insights
+        const operation = path.split("?")[0].split("(")[0];
+        appInsightsService.trackDataverseOperation(
+          method,
+          operation,
+          duration,
+          response.ok,
+          {
+            statusCode: response.status.toString(),
+            attempt: (attempt + 1).toString(),
+            path,
+          },
         );
-      }
 
-      return response;
+        // Handle 429 (Too Many Requests) with retry
+        if (response.status === 429) {
+          if (attempt === this.config.maxRetries) {
+            throw new Error("Rate limit exceeded after maximum retries");
+          }
+          const retryAfter = response.headers.get("Retry-After");
+          const waitTime = retryAfter
+            ? parseInt(retryAfter, 10) * 1000
+            : Math.pow(2, attempt) * 1000;
+
+          logger.warn(
+            `Rate limited (429). Retrying after ${waitTime / 1000} seconds...`,
+          );
+          await this.sleep(waitTime);
+          continue;
+        }
+
+        // Handle other HTTP errors (no retry)
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `Dataverse API request failed with status ${response.status}: ${errorText}`,
+          );
+        }
+
+        return response;
+      } catch (error) {
+        const duration = Date.now() - startTime;
+
+        // Log fetch errors
+        logger.error(
+          `[Dataverse API] ${method} ${path} - FAILED (${duration}ms)`,
+          error,
+        );
+
+        const operation = path.split("?")[0].split("(")[0];
+        appInsightsService.trackDataverseOperation(
+          method,
+          operation,
+          duration,
+          false,
+          { attempt: (attempt + 1).toString() },
+          error instanceof Error ? error : new Error(String(error)),
+        );
+
+        throw error;
+      }
     }
 
     throw new Error("Failed to send request to Dataverse");
@@ -160,70 +225,135 @@ export class DataverseWebApiService {
     additionalHeaders?: Record<string, string>,
   ): Promise<string> {
     const url = `${this.baseUrl}${path}`;
+    const startTime = Date.now();
+
+    // Log incoming request
+    logger.debug(`[Dataverse API] ${method} ${path}`, {
+      method,
+      path,
+      hasBody: !!body,
+      bodyKeys: body ? Object.keys(body).join(", ") : "none",
+    });
+
+    // Log full body at debug level if needed
+    if (body && process.env.LOG_LEVEL === "DEBUG") {
+      logger.debug(
+        `[Dataverse API] Request body: ${JSON.stringify(body, null, 2)}`,
+      );
+    }
 
     for (let attempt = 0; attempt <= this.config.maxRetries!; attempt++) {
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${accessToken}`,
-        "OData-MaxVersion": "4.0",
-        "OData-Version": "4.0",
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      };
+      try {
+        const headers: Record<string, string> = {
+          Authorization: `Bearer ${accessToken}`,
+          "OData-MaxVersion": "4.0",
+          "OData-Version": "4.0",
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        };
 
-      // Add session token for GET requests (elastic tables strong consistency)
-      if (this.sessionToken && method === "GET") {
-        headers["MSCRM.SessionToken"] = this.sessionToken;
-      }
-
-      // Merge additional headers if provided
-      if (additionalHeaders) {
-        Object.assign(headers, additionalHeaders);
-      }
-
-      const options: RequestInit = {
-        method,
-        headers,
-        signal: AbortSignal.timeout(this.config.timeoutInSeconds! * 1000),
-      };
-
-      if (body) {
-        options.body = JSON.stringify(body);
-      }
-
-      const response = await fetch(url, options);
-
-      // Capture session token if present
-      const sessionToken = response.headers.get("x-ms-session-token");
-      if (sessionToken) {
-        this.sessionToken = sessionToken;
-      }
-
-      // Handle 429 (Too Many Requests) with retry
-      if (response.status === 429) {
-        if (attempt === this.config.maxRetries) {
-          throw new Error("Rate limit exceeded after maximum retries");
+        // Add session token for GET requests (elastic tables strong consistency)
+        if (this.sessionToken && method === "GET") {
+          headers["MSCRM.SessionToken"] = this.sessionToken;
         }
-        const retryAfter = response.headers.get("Retry-After");
-        const waitTime = retryAfter
-          ? parseInt(retryAfter, 10) * 1000
-          : Math.pow(2, attempt) * 1000;
 
-        logger.warn(
-          `Rate limited (429). Retrying after ${waitTime / 1000} seconds...`,
+        // Merge additional headers if provided
+        if (additionalHeaders) {
+          Object.assign(headers, additionalHeaders);
+        }
+
+        const options: RequestInit = {
+          method,
+          headers,
+          signal: AbortSignal.timeout(this.config.timeoutInSeconds! * 1000),
+        };
+
+        if (body) {
+          options.body = JSON.stringify(body);
+        }
+
+        const response = await fetch(url, options);
+        const duration = Date.now() - startTime;
+
+        // Capture session token if present
+        const sessionToken = response.headers.get("x-ms-session-token");
+        if (sessionToken) {
+          this.sessionToken = sessionToken;
+        }
+
+        // Log response
+        logger.info(
+          `[Dataverse API] ${method} ${path} - ${response.status} (${duration}ms)`,
+          {
+            method,
+            path,
+            status: response.status,
+            duration,
+            attempt: attempt + 1,
+          },
         );
-        await this.sleep(waitTime);
-        continue;
-      }
 
-      // Handle other HTTP errors (no retry)
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          `Dataverse API request failed with status ${response.status}: ${errorText}`,
+        // Track in Application Insights
+        const operation = path.split("?")[0].split("(")[0];
+        appInsightsService.trackDataverseOperation(
+          method,
+          operation,
+          duration,
+          response.ok,
+          {
+            statusCode: response.status.toString(),
+            attempt: (attempt + 1).toString(),
+            path,
+          },
         );
-      }
 
-      return await response.text();
+        // Handle 429 (Too Many Requests) with retry
+        if (response.status === 429) {
+          if (attempt === this.config.maxRetries) {
+            throw new Error("Rate limit exceeded after maximum retries");
+          }
+          const retryAfter = response.headers.get("Retry-After");
+          const waitTime = retryAfter
+            ? parseInt(retryAfter, 10) * 1000
+            : Math.pow(2, attempt) * 1000;
+
+          logger.warn(
+            `Rate limited (429). Retrying after ${waitTime / 1000} seconds...`,
+          );
+          await this.sleep(waitTime);
+          continue;
+        }
+
+        // Handle other HTTP errors (no retry)
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `Dataverse API request failed with status ${response.status}: ${errorText}`,
+          );
+        }
+
+        return await response.text();
+      } catch (error) {
+        const duration = Date.now() - startTime;
+
+        // Log fetch errors
+        logger.error(
+          `[Dataverse API] ${method} ${path} - FAILED (${duration}ms)`,
+          error,
+        );
+
+        const operation = path.split("?")[0].split("(")[0];
+        appInsightsService.trackDataverseOperation(
+          method,
+          operation,
+          duration,
+          false,
+          { attempt: (attempt + 1).toString() },
+          error instanceof Error ? error : new Error(String(error)),
+        );
+
+        throw error;
+      }
     }
 
     throw new Error("Failed to send request to Dataverse");

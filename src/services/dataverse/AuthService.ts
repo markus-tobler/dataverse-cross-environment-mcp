@@ -5,6 +5,7 @@ import {
   validateOAuthConnectionString,
 } from "../../utils/connectionStringParser.js";
 import { Request } from "express";
+import { logger } from "../../utils/logger.js";
 
 export type AuthMode = "http-obo" | "stdio-interactive";
 
@@ -27,7 +28,7 @@ export class AuthService {
         },
       };
       this.interactiveAuthProvider = new InteractiveAuthProvider(
-        this.connectionParams
+        this.connectionParams,
       );
     } else {
       this.authMode = "http-obo";
@@ -62,16 +63,32 @@ export class AuthService {
   }
 
   async getAccessToken(req?: Request): Promise<string> {
-    if (this.authMode === "http-obo" && this.oboAuthProvider && req) {
-      return this.oboAuthProvider.getAccessToken(req);
-    } else if (
-      this.authMode === "stdio-interactive" &&
-      this.interactiveAuthProvider
-    ) {
-      return this.interactiveAuthProvider.getAccessToken(
-        this.config.Dataverse.url
-      );
+    logger.debug("[AuthService] Acquiring access token", {
+      hasRequest: !!req,
+      authMode: this.authMode,
+    });
+
+    try {
+      let token: string;
+
+      if (this.authMode === "http-obo" && this.oboAuthProvider && req) {
+        token = await this.oboAuthProvider.getAccessToken(req);
+      } else if (
+        this.authMode === "stdio-interactive" &&
+        this.interactiveAuthProvider
+      ) {
+        token = await this.interactiveAuthProvider.getAccessToken(
+          this.config.Dataverse.url,
+        );
+      } else {
+        throw new Error("Authentication provider not initialized correctly.");
+      }
+
+      logger.debug("[AuthService] Access token acquired successfully");
+      return token;
+    } catch (error) {
+      logger.exception("[AuthService] Failed to acquire access token", error);
+      throw error;
     }
-    throw new Error("Authentication provider not initialized correctly.");
   }
 }

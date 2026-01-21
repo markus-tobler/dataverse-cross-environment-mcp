@@ -29,7 +29,7 @@ export class DataverseClient {
   }
 
   private async createDataverseService(
-    req?: Request
+    req?: Request,
   ): Promise<DataverseWebApiService> {
     const config = this.authService.getConfig();
     const getAccessToken = async () => {
@@ -63,57 +63,57 @@ export class DataverseClient {
 
   async search(
     searchTerm: string,
+    top: number,
     tableFilter?: string | string[],
-    top: number = 10,
-    req?: Request
+    req?: Request,
   ): Promise<SearchResponse> {
     const service = await this.createDataverseService(req);
-    return this.dataService.search(service, searchTerm, tableFilter, top);
+    return this.dataService.search(service, searchTerm, top, tableFilter);
   }
 
   async retrieveRecord(
     tableName: string,
     recordId: string,
     req?: Request,
-    allColumns: boolean = false
+    allColumns: boolean = false,
   ): Promise<Record<string, any>> {
     const service = await this.createDataverseService(req);
     // Resolve to logical name (service methods require LogicalName)
     const logicalName = await this.metadataService.resolveLogicalName(
       service,
-      tableName
+      tableName,
     );
     return this.dataService.retrieveRecord(
       service,
       logicalName,
       recordId,
-      allColumns
+      allColumns,
     );
   }
 
   async describeTable(
     tableName: string,
     full: boolean = false,
-    req?: Request
+    req?: Request,
   ): Promise<TableDescription> {
     const service = await this.createDataverseService(req);
     // Resolve to logical name (EntityDefinitions API requires LogicalName)
     const logicalName = await this.metadataService.resolveLogicalName(
       service,
-      tableName
+      tableName,
     );
     return this.metadataService.describeTable(service, logicalName, full);
   }
 
   async describeTableFormat(
     tableName: string,
-    req?: Request
+    req?: Request,
   ): Promise<TableFormatDescription> {
     const service = await this.createDataverseService(req);
     // Resolve to logical name (EntityDefinitions API requires LogicalName)
     const logicalName = await this.metadataService.resolveLogicalName(
       service,
-      tableName
+      tableName,
     );
     return this.metadataService.describeTableFormat(service, logicalName);
   }
@@ -125,7 +125,7 @@ export class DataverseClient {
 
   async getPredefinedQueries(
     tableName: string,
-    req?: Request
+    req?: Request,
   ): Promise<import("../../types/dataverse.js").PredefinedQuery[]> {
     const service = await this.createDataverseService(req);
     return this.dataService.getPredefinedQueries(service, tableName);
@@ -134,20 +134,20 @@ export class DataverseClient {
   async runPredefinedQuery(
     queryIdOrName: string,
     tableName?: string,
-    req?: Request
+    req?: Request,
   ): Promise<import("../../types/dataverse.js").QueryResult> {
     const service = await this.createDataverseService(req);
     return this.dataService.runPredefinedQuery(
       service,
       queryIdOrName,
-      tableName
+      tableName,
     );
   }
 
   async runCustomQuery(
     fetchXml: string,
     tableName?: string,
-    req?: Request
+    req?: Request,
   ): Promise<import("../../types/dataverse.js").QueryResult> {
     const service = await this.createDataverseService(req);
     return this.dataService.runCustomQuery(service, fetchXml, tableName);
@@ -156,13 +156,13 @@ export class DataverseClient {
   async createRecord(
     tableName: string,
     data: Record<string, any>,
-    req?: Request
+    req?: Request,
   ): Promise<string> {
     const service = await this.createDataverseService(req);
     // Resolve to logical name (service methods require LogicalName)
     const logicalName = await this.metadataService.resolveLogicalName(
       service,
-      tableName
+      tableName,
     );
     return this.dataService.createRecord(service, logicalName, data);
   }
@@ -171,13 +171,13 @@ export class DataverseClient {
     tableName: string,
     recordId: string,
     data: Record<string, any>,
-    req?: Request
+    req?: Request,
   ): Promise<void> {
     const service = await this.createDataverseService(req);
     // Resolve to logical name (service methods require LogicalName)
     const logicalName = await this.metadataService.resolveLogicalName(
       service,
-      tableName
+      tableName,
     );
     return this.dataService.updateRecord(service, logicalName, recordId, data);
   }

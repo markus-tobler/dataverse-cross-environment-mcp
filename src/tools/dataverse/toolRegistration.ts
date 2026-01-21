@@ -372,7 +372,7 @@ export function registerDataverseTools(
           .number()
           .optional()
           .describe(
-            "Optional: Maximum number of results to return (default: 50)",
+            "Optional: Maximum number of results to return (default: 100)",
           ),
       },
     },
@@ -399,8 +399,8 @@ export function registerDataverseTools(
           const req = contextProvider.getContext();
           const searchResponse = await dataverseClient.search(
             params.searchTerm,
+            params.top ?? 100,
             params.tableFilter,
-            params.top || 10,
             req,
           );
 
@@ -476,16 +476,14 @@ export function registerDataverseTools(
       recordId: string;
       allColumns?: boolean;
     }) => {
-      try {
-        const userInfo = contextProvider.getUserInfo();
-        logger.info(
-          `Executing RetrieveRecord tool for user ${userInfo} - Table: ${
-            params.tableName
-          }, RecordId: ${params.recordId}, AllColumns: ${
-            params.allColumns || false
-          }`,
-        );
+      const userInfo = contextProvider.getUserInfo();
+      logger.info(`[Tool] retrieve_record invoked by ${userInfo}`, {
+        tableName: params.tableName,
+        recordId: params.recordId,
+        allColumns: params.allColumns || false,
+      });
 
+      try {
         const req = contextProvider.getContext();
         // DataverseClient.retrieveRecord now handles resolution internally
         const record = await dataverseClient.retrieveRecord(
@@ -640,14 +638,13 @@ export function registerDataverseTools(
       },
     },
     async (params: { tableName: string; full?: boolean }) => {
-      try {
-        const userInfo = contextProvider.getUserInfo();
-        logger.info(
-          `Executing DescribeTable tool for user ${userInfo} - Table: ${
-            params.tableName
-          }, Full: ${params.full || false}`,
-        );
+      const userInfo = contextProvider.getUserInfo();
+      logger.info(`[Tool] describe_table invoked by ${userInfo}`, {
+        tableName: params.tableName,
+        full: params.full || false,
+      });
 
+      try {
         const req = contextProvider.getContext();
         // DataverseClient.describeTable now handles resolution internally
         const description = await dataverseClient.describeTable(
@@ -748,12 +745,12 @@ export function registerDataverseTools(
       },
     },
     async (params: { tableName: string }) => {
-      try {
-        const userInfo = contextProvider.getUserInfo();
-        logger.info(
-          `Executing DescribeTableFormat tool for user ${userInfo} - Table: ${params.tableName}`,
-        );
+      const userInfo = contextProvider.getUserInfo();
+      logger.info(`[Tool] describe_table_format invoked by ${userInfo}`, {
+        tableName: params.tableName,
+      });
 
+      try {
         const req = contextProvider.getContext();
         // DataverseClient.describeTableFormat now handles resolution internally
         const formatDescription = await dataverseClient.describeTableFormat(
@@ -863,12 +860,12 @@ export function registerDataverseTools(
       },
     },
     async (params: { tableName: string }) => {
-      try {
-        const userInfo = contextProvider.getUserInfo();
-        logger.info(
-          `Executing GetPredefinedQueries tool for user ${userInfo} - Table: ${params.tableName}`,
-        );
+      const userInfo = contextProvider.getUserInfo();
+      logger.info(`[Tool] get_predefined_queries invoked by ${userInfo}`, {
+        tableName: params.tableName,
+      });
 
+      try {
         const req = contextProvider.getContext();
         const queries = await dataverseClient.getPredefinedQueries(
           params.tableName,
@@ -957,14 +954,13 @@ export function registerDataverseTools(
       },
     },
     async (params: { queryIdOrName: string; tableName?: string }) => {
-      try {
-        const userInfo = contextProvider.getUserInfo();
-        logger.info(
-          `Executing RunPredefinedQuery tool for user ${userInfo} - Query: ${
-            params.queryIdOrName
-          }, Table: ${params.tableName || "auto-detect"}`,
-        );
+      const userInfo = contextProvider.getUserInfo();
+      logger.info(`[Tool] run_predefined_query invoked by ${userInfo}`, {
+        queryIdOrName: params.queryIdOrName,
+        tableName: params.tableName || "auto-detect",
+      });
 
+      try {
         const req = contextProvider.getContext();
         const result = await dataverseClient.runPredefinedQuery(
           params.queryIdOrName,
@@ -1062,14 +1058,13 @@ export function registerDataverseTools(
       },
     },
     async (params: { fetchXml: string; tableName?: string }) => {
-      try {
-        const userInfo = contextProvider.getUserInfo();
-        logger.info(
-          `Executing RunCustomQuery tool for user ${userInfo} - Table: ${
-            params.tableName || "from FetchXML"
-          }`,
-        );
+      const userInfo = contextProvider.getUserInfo();
+      logger.info(`[Tool] run_custom_query invoked by ${userInfo}`, {
+        tableName: params.tableName || "from FetchXML",
+        fetchXmlLength: params.fetchXml.length,
+      });
 
+      try {
         const req = contextProvider.getContext();
         const result = await dataverseClient.runCustomQuery(
           params.fetchXml,
@@ -1181,13 +1176,14 @@ export function registerDataverseTools(
       }),
     },
     async (params: any) => {
-      try {
-        const { table, data } = params;
-        const userInfo = contextProvider.getUserInfo();
-        logger.info(
-          `Executing CreateRecord tool for user ${userInfo} on table ${table}`,
-        );
+      const { table, data } = params;
+      const userInfo = contextProvider.getUserInfo();
+      logger.info(`[Tool] create_record invoked by ${userInfo}`, {
+        table,
+        fieldCount: data ? Object.keys(data).length : 0,
+      });
 
+      try {
         const req = contextProvider.getContext();
         const recordId = await dataverseClient.createRecord(table, data, req);
 
@@ -1242,13 +1238,15 @@ export function registerDataverseTools(
       }),
     },
     async (params: any) => {
-      try {
-        const { table, record_id, data } = params;
-        const userInfo = contextProvider.getUserInfo();
-        logger.info(
-          `Executing UpdateRecord tool for user ${userInfo} on table ${table} and record ${record_id}`,
-        );
+      const { table, record_id, data } = params;
+      const userInfo = contextProvider.getUserInfo();
+      logger.info(`[Tool] update_record invoked by ${userInfo}`, {
+        table,
+        recordId: record_id,
+        fieldCount: data ? Object.keys(data).length : 0,
+      });
 
+      try {
         const req = contextProvider.getContext();
         await dataverseClient.updateRecord(table, record_id, data, req);
 

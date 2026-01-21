@@ -19,7 +19,7 @@ jest.mock(
       }
     },
   }),
-  { virtual: true }
+  { virtual: true },
 );
 jest.mock(
   "../../auth/OboAuthProvider.js",
@@ -31,7 +31,7 @@ jest.mock(
       }
     },
   }),
-  { virtual: true }
+  { virtual: true },
 );
 
 describe("DataverseClient", () => {
@@ -48,7 +48,7 @@ describe("DataverseClient", () => {
     // Reset mocks and handlers before each test
     jest.clearAllMocks();
     setFetchHandler(async () =>
-      createDataverseResponse.error(500, "Unhandled request")
+      createDataverseResponse.error(500, "Unhandled request"),
     );
 
     // Configure a default successful WhoAmI for initialization
@@ -114,7 +114,7 @@ describe("DataverseClient", () => {
               ],
               Count: 2,
             }),
-          })
+          }),
         ),
         getDataverseUrl: () => "https://fake.crm.dynamics.com",
       };
@@ -122,13 +122,13 @@ describe("DataverseClient", () => {
         .spyOn(DataverseClient.prototype as any, "createDataverseService")
         .mockResolvedValue(fakeService);
 
-      const result = await client.search(searchTerm, undefined, 10);
+      const result = await client.search(searchTerm, 10, undefined);
 
       expect(fakeService.sendRequestString).toHaveBeenCalledWith(
         "token",
         "POST",
         "searchquery",
-        expect.objectContaining({ search: searchTerm })
+        expect.objectContaining({ search: searchTerm }),
       );
       expect(result.totalRecordCount).toBe(2);
       expect(result.results).toHaveLength(2);
@@ -137,14 +137,14 @@ describe("DataverseClient", () => {
           tableName: "account",
           recordId: "acc-guid-1",
           primaryName: "Contoso Corp",
-        })
+        }),
       );
       expect(result.results[1]).toEqual(
         expect.objectContaining({
           tableName: "contact",
           recordId: "con-guid-1",
           primaryName: "John Doe (Contoso)",
-        })
+        }),
       );
     });
   });

@@ -28,11 +28,16 @@ export class DataMutationService {
   async createRecord(
     service: DataverseWebApiService,
     logicalName: string,
-    data: Record<string, any>
+    data: Record<string, any>,
   ): Promise<string> {
+    logger.info(`[DataMutationService] Creating record in '${logicalName}'`, {
+      tableName: logicalName,
+      fieldCount: Object.keys(data).length,
+    });
+
     logger.debug(
       `CreateRecord called for table '${logicalName}' with data:`,
-      JSON.stringify(data, null, 2)
+      JSON.stringify(data, null, 2),
     );
     logger.debug(`Data keys provided: ${Object.keys(data).join(", ")}`);
 
@@ -41,19 +46,28 @@ export class DataMutationService {
 
     const entitySetName = await this.metadataService.getEntitySetName(
       service,
-      logicalName
+      logicalName,
     );
     const processedData = await this.processPayload(service, logicalName, data);
     logger.debug(
       `Processed payload for table '${logicalName}':`,
-      JSON.stringify(processedData, null, 2)
+      JSON.stringify(processedData, null, 2),
     );
+
+    logger.debug(`[DataMutationService] Sending create request to Dataverse`, {
+      entitySetName,
+      payloadKeys: Object.keys(processedData).join(", "),
+    });
+
     const response = await service.createRecord(entitySetName, processedData);
 
     if (response.ok) {
       const odataEntityId = response.headers.get("OData-EntityId");
       if (odataEntityId) {
         const recordId = odataEntityId.split("(")[1].split(")")[0];
+        logger.info(
+          `[DataMutationService] Successfully created record: ${recordId}`,
+        );
         return recordId;
       }
     }
@@ -71,14 +85,14 @@ export class DataMutationService {
   private async validateRequiredAttributes(
     service: DataverseWebApiService,
     tableName: string,
-    data: Record<string, any>
+    data: Record<string, any>,
   ): Promise<void> {
     logger.debug(`Validating required attributes for table '${tableName}'`);
 
     const tableDescription = await this.metadataService.describeTable(
       service,
       tableName,
-      true // Get full metadata to ensure we have all required fields
+      true, // Get full metadata to ensure we have all required fields
     );
 
     const missingRequiredFields: string[] = [];
@@ -99,21 +113,21 @@ export class DataMutationService {
 
     logger.debug(
       `System-managed fields that will be skipped: ${systemManagedFields.join(
-        ", "
-      )}`
+        ", ",
+      )}`,
     );
 
     const requiredFields = tableDescription.attributes.filter(
       (attr) =>
         attr.isRequired &&
         !attr.isReadOnly &&
-        attr.logicalName !== tableDescription.primaryIdAttribute
+        attr.logicalName !== tableDescription.primaryIdAttribute,
     );
 
     logger.debug(
       `Found ${requiredFields.length} required fields: ${requiredFields
         .map((f) => f.logicalName)
-        .join(", ")}`
+        .join(", ")}`,
     );
 
     for (const attribute of tableDescription.attributes) {
@@ -126,7 +140,7 @@ export class DataMutationService {
         // Skip system-managed fields that Dataverse handles automatically
         if (systemManagedFields.includes(attribute.logicalName)) {
           logger.debug(
-            `Skipping system-managed field: ${attribute.logicalName}`
+            `Skipping system-managed field: ${attribute.logicalName}`,
           );
           continue;
         }
@@ -142,13 +156,13 @@ export class DataMutationService {
           data.hasOwnProperty(`${attribute.logicalName}@odata.bind`);
 
         logger.debug(
-          `Checking required field '${attribute.logicalName}' (${attribute.type}): isProvided=${isProvided}, isLookupProvided=${isLookupProvided}`
+          `Checking required field '${attribute.logicalName}' (${attribute.type}): isProvided=${isProvided}, isLookupProvided=${isLookupProvided}`,
         );
 
         if (!isProvided && !isLookupProvided) {
           logger.debug(`Required field '${attribute.logicalName}' is MISSING`);
           missingRequiredFields.push(
-            `${attribute.logicalName} (${attribute.displayName})`
+            `${attribute.logicalName} (${attribute.displayName})`,
           );
         } else {
           logger.debug(
@@ -156,8 +170,8 @@ export class DataMutationService {
               attribute.logicalName
             }' is provided with value: ${JSON.stringify(
               data[attribute.logicalName] ||
-                data[`${attribute.logicalName}@odata.bind`]
-            )}`
+                data[`${attribute.logicalName}@odata.bind`],
+            )}`,
           );
         }
       }
@@ -169,16 +183,16 @@ export class DataMutationService {
         .join("\n");
 
       logger.error(
-        `Validation failed for table '${tableName}': Missing ${missingRequiredFields.length} required field(s)`
+        `Validation failed for table '${tableName}': Missing ${missingRequiredFields.length} required field(s)`,
       );
 
       throw new Error(
-        `Cannot create record in table '${tableName}': Missing required attributes:\n${fieldList}\n\nUse describe_table to see all required fields and their data types.`
+        `Cannot create record in table '${tableName}': Missing required attributes:\n${fieldList}\n\nUse describe_table to see all required fields and their data types.`,
       );
     }
 
     logger.debug(
-      `Validation successful for table '${tableName}' - all required fields provided`
+      `Validation successful for table '${tableName}' - all required fields provided`,
     );
   }
 
@@ -193,39 +207,56 @@ export class DataMutationService {
     service: DataverseWebApiService,
     logicalName: string,
     recordId: string,
-    data: Record<string, any>
+    data: Record<string, any>,
   ): Promise<void> {
+    logger.info(`[DataMutationService] Updating record in '${logicalName}'`, {
+      tableName: logicalName,
+      recordId,
+      fieldCount: Object.keys(data).length,
+    });
+
     const entitySetName = await this.metadataService.getEntitySetName(
       service,
-      logicalName
+      logicalName,
     );
     const processedData = await this.processPayload(
       service,
       logicalName,
       data,
-      recordId
+      recordId,
     );
+
+    logger.debug(`[DataMutationService] Sending update request to Dataverse`, {
+      entitySetName,
+      recordId,
+      payloadKeys: Object.keys(processedData).join(", "),
+    });
+
     const response = await service.updateRecord(
       entitySetName,
       recordId,
-      processedData
+      processedData,
     );
 
     if (!response.ok) {
       throw new Error(`Failed to update record: ${await response.text()}`);
     }
+
+    logger.info(
+      `[DataMutationService] Successfully updated record: ${recordId}`,
+    );
   }
 
   private async processPayload(
     service: DataverseWebApiService,
     tableName: string,
     data: Record<string, any>,
-    recordId?: string
+    recordId?: string,
   ): Promise<Record<string, any>> {
     const tableDescription = await this.metadataService.describeTable(
       service,
       tableName,
-      true
+      true,
     );
     const processedData: Record<string, any> = {};
 
@@ -235,7 +266,7 @@ export class DataMutationService {
     for (const key in normalizedData) {
       if (Object.prototype.hasOwnProperty.call(normalizedData, key)) {
         const attribute = tableDescription.attributes.find(
-          (attr) => attr.logicalName === key
+          (attr) => attr.logicalName === key,
         );
         if (attribute) {
           const value = normalizedData[key];
@@ -250,7 +281,7 @@ export class DataMutationService {
             processedData[`${key}@odata.bind`] = await this.resolveLookup(
               service,
               attribute,
-              value
+              value,
             );
           } else if (
             attribute.type === "PicklistType" ||
@@ -271,18 +302,17 @@ export class DataMutationService {
     // Auto-add transaction currency if not provided
     if (
       tableDescription.attributes.some(
-        (attr) => attr.logicalName === "transactioncurrencyid"
+        (attr) => attr.logicalName === "transactioncurrencyid",
       ) &&
       !data.hasOwnProperty("transactioncurrencyid")
     ) {
       const currencyId = await service.getOrganizationBaseCurrencyId();
       const entitySetName = await this.metadataService.getEntitySetName(
         service,
-        "transactioncurrency"
+        "transactioncurrency",
       );
-      processedData[
-        "transactioncurrencyid@odata.bind"
-      ] = `/${entitySetName}(${currencyId})`;
+      processedData["transactioncurrencyid@odata.bind"] =
+        `/${entitySetName}(${currencyId})`;
     }
 
     return processedData;
@@ -291,7 +321,7 @@ export class DataMutationService {
   private async resolveLookup(
     service: DataverseWebApiService,
     attribute: AttributeDescription,
-    value: any
+    value: any,
   ): Promise<string> {
     // b) webapi style reference '<entityset>(<guid>)'
     if (
@@ -308,12 +338,12 @@ export class DataMutationService {
         const targetEntity = attribute.targets[0];
         const entitySetName = await this.metadataService.getEntitySetName(
           service,
-          targetEntity
+          targetEntity,
         );
         return `/${entitySetName}(${value})`;
       } else {
         throw new Error(
-          `Lookup for attribute ${attribute.logicalName} is polymorphic. Please provide the entity set name.`
+          `Lookup for attribute ${attribute.logicalName} is polymorphic. Please provide the entity set name.`,
         );
       }
     }
@@ -323,7 +353,7 @@ export class DataMutationService {
       const parts = value.split("=");
       const entitySetName = await this.metadataService.getEntitySetName(
         service,
-        parts[0]
+        parts[0],
       );
       return `/${entitySetName}(${parts[1]})`;
     }
@@ -334,19 +364,19 @@ export class DataMutationService {
         const tableDescription = await this.metadataService.describeTable(
           service,
           target,
-          false
+          false,
         );
         if (tableDescription.primaryNameAttribute) {
           const entitySetName = await this.metadataService.getEntitySetName(
             service,
-            target
+            target,
           );
           try {
             const escapedValue = escapeODataValue(value);
             const record = await service.retrieveRecordByAlternateKey(
               entitySetName,
               tableDescription.primaryNameAttribute,
-              escapedValue
+              escapedValue,
             );
             if (record && record.value && record.value.length === 1) {
               const recordId = record.value[0][`${target}id`];
@@ -360,13 +390,13 @@ export class DataMutationService {
     }
 
     throw new Error(
-      `Could not resolve lookup value for attribute ${attribute.logicalName}`
+      `Could not resolve lookup value for attribute ${attribute.logicalName}`,
     );
   }
 
   private async resolveOptionSet(
     attribute: AttributeDescription,
-    value: any
+    value: any,
   ): Promise<number> {
     if (typeof value === "number") {
       return value;
@@ -374,19 +404,19 @@ export class DataMutationService {
 
     if (typeof value === "string" && attribute.optionSet) {
       const matchingOptions = attribute.optionSet.filter(
-        (option) => option.label === value
+        (option) => option.label === value,
       );
       if (matchingOptions.length === 1) {
         return matchingOptions[0].value;
       } else if (matchingOptions.length > 1) {
         throw new Error(
-          `Option set value '${value}' for attribute ${attribute.logicalName} is not unique.`
+          `Option set value '${value}' for attribute ${attribute.logicalName} is not unique.`,
         );
       }
     }
 
     throw new Error(
-      `Could not resolve option set value for attribute ${attribute.logicalName}`
+      `Could not resolve option set value for attribute ${attribute.logicalName}`,
     );
   }
 
@@ -395,7 +425,7 @@ export class DataMutationService {
    * For example: ownerid + owneridtype -> ownerid with entity type prefix
    */
   private normalizeSpecialPatterns(
-    data: Record<string, any>
+    data: Record<string, any>,
   ): Record<string, any> {
     const normalized: Record<string, any> = { ...data };
 
@@ -413,7 +443,7 @@ export class DataMutationService {
       delete normalized.owneridtype;
 
       logger.debug(
-        `Normalized ownerid pattern: ownerid="${ownerGuid}", owneridtype="${ownerType}" -> ownerid="${normalized.ownerid}"`
+        `Normalized ownerid pattern: ownerid="${ownerGuid}", owneridtype="${ownerType}" -> ownerid="${normalized.ownerid}"`,
       );
     }
 
@@ -426,7 +456,7 @@ export class DataMutationService {
       delete normalized.regardingobjecttypecode;
 
       logger.debug(
-        `Normalized regardingobjectid pattern: regardingobjectid="${regardingGuid}", regardingobjecttypecode="${regardingType}" -> regardingobjectid="${normalized.regardingobjectid}"`
+        `Normalized regardingobjectid pattern: regardingobjectid="${regardingGuid}", regardingobjecttypecode="${regardingType}" -> regardingobjectid="${normalized.regardingobjectid}"`,
       );
     }
 
@@ -444,7 +474,7 @@ export class DataMutationService {
           // Derive the corresponding ID field name
           const baseFieldName = key.substring(
             0,
-            key.length - pattern.typeSuffix.length
+            key.length - pattern.typeSuffix.length,
           );
           const idFieldName = baseFieldName + pattern.idSuffix;
 
@@ -461,7 +491,7 @@ export class DataMutationService {
             delete normalized[key];
 
             logger.debug(
-              `Normalized polymorphic lookup pattern: ${idFieldName}="${idValue}", ${key}="${typeValue}" -> ${idFieldName}="${normalized[idFieldName]}"`
+              `Normalized polymorphic lookup pattern: ${idFieldName}="${idValue}", ${key}="${typeValue}" -> ${idFieldName}="${normalized[idFieldName]}"`,
             );
           }
         }

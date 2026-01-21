@@ -23,7 +23,7 @@ export class DataQueryService {
   getDeepLinkUrl(
     dataverseUrl: string,
     tableName: string,
-    recordId: string
+    recordId: string,
   ): string {
     const orgUrl = dataverseUrl
       .replace(/\/api\/data\/v[0-9.]+\/?$/, "")
@@ -42,8 +42,8 @@ export class DataQueryService {
   async search(
     service: DataverseWebApiService,
     searchTerm: string,
+    top: number,
     tableFilter?: string | string[],
-    top: number = 10
   ): Promise<SearchResponse> {
     const accessToken = await service.getAccessTokenFunc()();
 
@@ -57,13 +57,13 @@ export class DataQueryService {
         // Resolve logical name first (handles both logical names and entity set names)
         const logicalName = await this.metadataService.resolveLogicalName(
           service,
-          table
+          table,
         );
 
         const importantColumns =
           await this.metadataService.getImportantColumnsForTable(
             service,
-            logicalName
+            logicalName,
           );
 
         const searchEntity: any = {
@@ -91,10 +91,10 @@ export class DataQueryService {
     logger.debug(
       `Executing search with term: '${searchTerm}', tableFilter: '${
         tableFilter || "none"
-      }', top: ${top}`
+      }', top: ${top}`,
     );
     logger.debug(
-      `Search request body: ${JSON.stringify(searchRequestBody, null, 2)}`
+      `Search request body: ${JSON.stringify(searchRequestBody, null, 2)}`,
     );
 
     try {
@@ -102,7 +102,7 @@ export class DataQueryService {
         accessToken,
         "POST",
         "searchquery",
-        searchRequestBody
+        searchRequestBody,
       );
 
       const responseData = JSON.parse(response);
@@ -122,7 +122,7 @@ export class DataQueryService {
         if (r.Attributes) {
           const attrs = Object.entries(r.Attributes);
           const nameAttr = attrs.find(
-            ([key]) => key !== "@search.objecttypecode"
+            ([key]) => key !== "@search.objecttypecode",
           );
           if (nameAttr) {
             primaryName = String(nameAttr[1] || "");
@@ -140,7 +140,7 @@ export class DataQueryService {
           deepLink: this.getDeepLinkUrl(
             service.getDataverseUrl(),
             tableName,
-            recordId
+            recordId,
           ),
         };
       });
@@ -166,14 +166,18 @@ export class DataQueryService {
     service: DataverseWebApiService,
     logicalName: string,
     recordId: string,
-    allColumns: boolean = false
+    allColumns: boolean = false,
   ): Promise<Record<string, any>> {
+    logger.debug(
+      `[DataQueryService] retrieveRecord - Table: ${logicalName}, ID: ${recordId}, AllColumns: ${allColumns}`,
+    );
+
     const accessToken = await service.getAccessTokenFunc()();
 
     try {
       const entitySetName = await this.metadataService.getEntitySetName(
         service,
-        logicalName
+        logicalName,
       );
 
       let selectClause = "*";
@@ -182,7 +186,7 @@ export class DataQueryService {
         const importantColumnNames =
           await this.metadataService.getImportantColumnsForTable(
             service,
-            logicalName
+            logicalName,
           );
         if (importantColumnNames.length > 0) {
           selectClause = importantColumnNames.join(",");
@@ -203,13 +207,13 @@ export class DataQueryService {
         tableDescription = await this.metadataService.describeTable(
           service,
           logicalName,
-          false
+          false,
         );
         const primaryNameAttribute = tableDescription.primaryNameAttribute;
 
         if (!primaryNameAttribute) {
           throw new Error(
-            `Table '${logicalName}' does not have a primary name attribute. Please use the GUID to retrieve records.`
+            `Table '${logicalName}' does not have a primary name attribute. Please use the GUID to retrieve records.`,
           );
         }
 
@@ -226,7 +230,7 @@ export class DataQueryService {
         {
           Prefer:
             'odata.include-annotations="OData.Community.Display.V1.FormattedValue"',
-        }
+        },
       );
 
       const data = JSON.parse(response);
@@ -235,18 +239,18 @@ export class DataQueryService {
         // When querying by name, we get an array response
         if (!tableDescription) {
           throw new Error(
-            `Internal error: tableDescription is not available when querying by name`
+            `Internal error: tableDescription is not available when querying by name`,
           );
         }
 
         if (!data.value || data.value.length === 0) {
           throw new Error(
-            `No record found with ${tableDescription.primaryNameAttribute} = '${recordId}' in table '${logicalName}'`
+            `No record found with ${tableDescription.primaryNameAttribute} = '${recordId}' in table '${logicalName}'`,
           );
         }
         if (data.value.length > 1) {
           throw new Error(
-            `Multiple records found with ${tableDescription.primaryNameAttribute} = '${recordId}' in table '${logicalName}'. Please use the unique GUID instead.`
+            `Multiple records found with ${tableDescription.primaryNameAttribute} = '${recordId}' in table '${logicalName}'. Please use the unique GUID instead.`,
           );
         }
         return data.value[0] || {};
@@ -256,7 +260,7 @@ export class DataQueryService {
     } catch (error: any) {
       logger.error(
         `Error retrieving record ${recordId} from table ${logicalName}:`,
-        error
+        error,
       );
       throw error;
     }
@@ -267,11 +271,15 @@ export class DataQueryService {
    */
   async getPredefinedQueries(
     service: DataverseWebApiService,
-    tableName: string
+    tableName: string,
   ): Promise<PredefinedQuery[]> {
+    logger.debug(
+      `[DataQueryService] getPredefinedQueries - Table: ${tableName}`,
+    );
+
     const logicalName = await this.metadataService.resolveLogicalName(
       service,
-      tableName
+      tableName,
     );
     const accessToken = await service.getAccessTokenFunc()();
 
@@ -283,7 +291,7 @@ export class DataQueryService {
         accessToken,
         "GET",
         `WhoAmI`,
-        undefined
+        undefined,
       );
       const whoAmI = JSON.parse(whoAmIText);
       const currentUserId: string | undefined = whoAmI?.UserId;
@@ -296,7 +304,7 @@ export class DataQueryService {
             accessToken,
             "GET",
             `systemusers(${currentUserId})/systemuserroles_association?$select=roleid,name`,
-            undefined
+            undefined,
           );
           const rolesData = JSON.parse(rolesText);
           const values = Array.isArray(rolesData?.value) ? rolesData.value : [];
@@ -313,7 +321,7 @@ export class DataQueryService {
         accessToken,
         "GET",
         `savedqueries?$filter=returnedtypecode eq '${logicalName}' and statecode eq 0&$select=savedqueryid,name,returnedtypecode,roledisplayconditionsxml`,
-        undefined
+        undefined,
       );
 
       const savedQueryData = JSON.parse(savedQueryResponse);
@@ -327,10 +335,10 @@ export class DataQueryService {
               new Set(
                 (
                   xml.match(
-                    /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g
+                    /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g,
                   ) || []
-                ).map((g) => g.toLowerCase())
-              )
+                ).map((g) => g.toLowerCase()),
+              ),
             );
             if (guids.length > 0) {
               include = guids.some((g) => userRoleIds.has(g));
@@ -351,7 +359,7 @@ export class DataQueryService {
         accessToken,
         "GET",
         `userqueries?$filter=returnedtypecode eq '${logicalName}' and statecode eq 0&$select=userqueryid,name,returnedtypecode`,
-        undefined
+        undefined,
       );
 
       const userQueryData = JSON.parse(userQueryResponse);
@@ -366,13 +374,13 @@ export class DataQueryService {
       }
 
       logger.info(
-        `Found ${queries.length} predefined queries for table ${logicalName}`
+        `Found ${queries.length} predefined queries for table ${logicalName}`,
       );
       return queries;
     } catch (error: any) {
       logger.error(
         `Error fetching predefined queries for table ${logicalName}:`,
-        error
+        error,
       );
       throw error;
     }
@@ -384,8 +392,12 @@ export class DataQueryService {
   async runPredefinedQuery(
     service: DataverseWebApiService,
     queryIdOrName: string,
-    tableName?: string
+    tableName?: string,
   ): Promise<QueryResult> {
+    logger.debug(
+      `[DataQueryService] runPredefinedQuery - Query: ${queryIdOrName}, Table: ${tableName || "auto-detect"}`,
+    );
+
     const accessToken = await service.getAccessTokenFunc()();
 
     try {
@@ -402,7 +414,7 @@ export class DataQueryService {
             accessToken,
             "GET",
             `savedqueries(${queryIdOrName})?$select=fetchxml,returnedtypecode`,
-            undefined
+            undefined,
           );
           const savedQueryData = JSON.parse(savedQueryResponse);
           fetchXml = savedQueryData.fetchxml;
@@ -417,7 +429,7 @@ export class DataQueryService {
               accessToken,
               "GET",
               `userqueries(${queryIdOrName})?$select=fetchxml,returnedtypecode`,
-              undefined
+              undefined,
             );
             const userQueryData = JSON.parse(userQueryResponse);
             fetchXml = userQueryData.fetchxml;
@@ -430,13 +442,13 @@ export class DataQueryService {
         // Search by name
         if (!tableName) {
           throw new Error(
-            "Table name is required when querying by name instead of ID"
+            "Table name is required when querying by name instead of ID",
           );
         }
 
         const logicalName = await this.metadataService.resolveLogicalName(
           service,
-          tableName
+          tableName,
         );
 
         // Escape the query name for OData filter
@@ -447,7 +459,7 @@ export class DataQueryService {
           accessToken,
           "GET",
           `savedqueries?$filter=name eq '${escapedQueryName}' and returnedtypecode eq '${logicalName}'&$select=savedqueryid,fetchxml,returnedtypecode`,
-          undefined
+          undefined,
         );
         const savedQueryData = JSON.parse(savedQueryResponse);
 
@@ -460,7 +472,7 @@ export class DataQueryService {
             accessToken,
             "GET",
             `userqueries?$filter=name eq '${escapedQueryName}' and returnedtypecode eq '${logicalName}'&$select=userqueryid,fetchxml,returnedtypecode`,
-            undefined
+            undefined,
           );
           const userQueryData = JSON.parse(userQueryResponse);
 
@@ -469,7 +481,7 @@ export class DataQueryService {
             returnedTypeCode = userQueryData.value[0].returnedtypecode;
           } else {
             throw new Error(
-              `Query with name '${queryIdOrName}' not found for table '${logicalName}'`
+              `Query with name '${queryIdOrName}' not found for table '${logicalName}'`,
             );
           }
         }
@@ -489,8 +501,12 @@ export class DataQueryService {
   async runCustomQuery(
     service: DataverseWebApiService,
     fetchXml: string,
-    tableName?: string
+    tableName?: string,
   ): Promise<QueryResult> {
+    logger.debug(
+      `[DataQueryService] runCustomQuery - Table: ${tableName || "from FetchXML"}, FetchXML length: ${fetchXml.length}`,
+    );
+
     const accessToken = await service.getAccessTokenFunc()();
 
     try {
@@ -502,18 +518,18 @@ export class DataQueryService {
           entityName = entityMatch[1];
         } else {
           throw new Error(
-            "Could not determine table name from FetchXML. Please provide tableName parameter."
+            "Could not determine table name from FetchXML. Please provide tableName parameter.",
           );
         }
       }
 
       const logicalName = await this.metadataService.resolveLogicalName(
         service,
-        entityName
+        entityName,
       );
       const entitySetName = await this.metadataService.getEntitySetName(
         service,
-        logicalName
+        logicalName,
       );
 
       // Execute FetchXML query
@@ -526,7 +542,7 @@ export class DataQueryService {
         {
           Prefer:
             'odata.include-annotations="OData.Community.Display.V1.FormattedValue"',
-        }
+        },
       );
 
       const data = JSON.parse(response);
@@ -543,7 +559,7 @@ export class DataQueryService {
       const metadataResponse = await service.sendRequestString(
         accessToken,
         "GET",
-        `EntityDefinitions(LogicalName='${logicalName}')?$select=PrimaryIdAttribute`
+        `EntityDefinitions(LogicalName='${logicalName}')?$select=PrimaryIdAttribute`,
       );
       const entityMetadata = JSON.parse(metadataResponse);
       const primaryIdAttribute =
@@ -557,13 +573,13 @@ export class DataQueryService {
           deepLink: this.getDeepLinkUrl(
             service.getDataverseUrl(),
             logicalName,
-            recordId
+            recordId,
           ),
         };
       });
 
       logger.info(
-        `FetchXML query executed successfully. Retrieved ${records.length} records from ${logicalName}`
+        `FetchXML query executed successfully. Retrieved ${records.length} records from ${logicalName}`,
       );
 
       return {
@@ -581,7 +597,7 @@ export class DataQueryService {
       ) {
         const errorDetails = this.parseFetchXmlError(error.message);
         throw new Error(
-          `Invalid FetchXML query: ${errorDetails}. Please check your FetchXML syntax and ensure all entity and attribute names are correct.`
+          `Invalid FetchXML query: ${errorDetails}. Please check your FetchXML syntax and ensure all entity and attribute names are correct.`,
         );
       }
 
