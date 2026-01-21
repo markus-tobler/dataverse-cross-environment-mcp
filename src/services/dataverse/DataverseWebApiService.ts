@@ -1,5 +1,6 @@
 import { DataverseConfig, WhoAmIResponse } from "../../types/dataverse.js";
 import { logger } from "../../utils/logger.js";
+import { appInsightsService } from "../telemetry/ApplicationInsightsService.js";
 
 /**
  * Service class for interacting with Dataverse Web API
@@ -56,209 +57,176 @@ export class DataverseWebApiService {
       }
 
       logger.info(
-        `Successfully connected to Dataverse. User ID: ${this.userId}, Organization ID: ${this.organizationId}`
+        `Successfully connected to Dataverse. User ID: ${this.userId}, Organization ID: ${this.organizationId}`,
       );
     } catch (error) {
-      logger.error("Failed to initialize service with WhoAmI request:", error);
+      logger.exception(
+        "Failed to initialize service with WhoAmI request",
+        error,
+        {
+          component: "DataverseWebApiService",
+          operation: "initialize",
+        },
+      );
       throw new Error("Failed to initialize Dataverse Web API service");
     }
   }
 
   /**
-   * Send an HTTP request to Dataverse Web API with retry logic
+   * Send an HTTP request to Dataverse Web API.
+   * Only retries on 429 (rate limiting) responses.
    */
   async sendRequest(
     path: string,
     method: string = "GET",
-    body?: any
+    body?: any,
   ): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
-    let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= this.config.maxRetries!; attempt++) {
-      try {
-        const accessToken = await this.config.getAccessToken();
+      const accessToken = await this.config.getAccessToken();
 
-        const headers: Record<string, string> = {
-          Authorization: `Bearer ${accessToken}`,
-          "OData-MaxVersion": "4.0",
-          "OData-Version": "4.0",
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        };
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${accessToken}`,
+        "OData-MaxVersion": "4.0",
+        "OData-Version": "4.0",
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      };
 
-        // Add session token for GET requests (elastic tables strong consistency)
-        if (this.sessionToken && method === "GET") {
-          headers["MSCRM.SessionToken"] = this.sessionToken;
+      // Add session token for GET requests (elastic tables strong consistency)
+      if (this.sessionToken && method === "GET") {
+        headers["MSCRM.SessionToken"] = this.sessionToken;
+      }
+
+      const options: RequestInit = {
+        method,
+        headers,
+        signal: AbortSignal.timeout(this.config.timeoutInSeconds! * 1000),
+      };
+
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+
+      const response = await fetch(url, options);
+
+      // Capture session token if present
+      const sessionToken = response.headers.get("x-ms-session-token");
+      if (sessionToken) {
+        this.sessionToken = sessionToken;
+      }
+
+      // Handle 429 (Too Many Requests) with retry
+      if (response.status === 429) {
+        if (attempt === this.config.maxRetries) {
+          throw new Error("Rate limit exceeded after maximum retries");
         }
+        const retryAfter = response.headers.get("Retry-After");
+        const waitTime = retryAfter
+          ? parseInt(retryAfter, 10) * 1000
+          : Math.pow(2, attempt) * 1000;
 
-        const options: RequestInit = {
-          method,
-          headers,
-          signal: AbortSignal.timeout(this.config.timeoutInSeconds! * 1000),
-        };
-
-        if (body) {
-          options.body = JSON.stringify(body);
-        }
-
-        const response = await fetch(url, options);
-
-        // Capture session token if present
-        const sessionToken = response.headers.get("x-ms-session-token");
-        if (sessionToken) {
-          this.sessionToken = sessionToken;
-        }
-
-        // Handle 429 (Too Many Requests) with retry
-        if (response.status === 429) {
-          const retryAfter = response.headers.get("Retry-After");
-          const waitTime = retryAfter
-            ? parseInt(retryAfter, 10) * 1000
-            : Math.pow(2, attempt) * 1000;
-
-          logger.warn(
-            `Rate limited (429). Retrying after ${waitTime / 1000} seconds...`
-          );
-          await this.sleep(waitTime);
-          continue;
-        }
-
-        // Handle other HTTP errors
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(
-            `Dataverse API request failed with status ${response.status}: ${errorText}`
-          );
-        }
-
-        return response;
-      } catch (error) {
-        lastError = error as Error;
-
-        // Don't retry on abort/timeout or if we've exhausted retries
-        if (
-          error instanceof Error &&
-          (error.name === "AbortError" ||
-            error.name === "TimeoutError" ||
-            attempt === this.config.maxRetries)
-        ) {
-          break;
-        }
-
-        // Exponential backoff for retries
-        const waitTime = Math.pow(2, attempt) * 1000;
         logger.warn(
-          `Request failed (attempt ${attempt + 1}). Retrying after ${
-            waitTime / 1000
-          } seconds...`
+          `Rate limited (429). Retrying after ${waitTime / 1000} seconds...`,
         );
         await this.sleep(waitTime);
+        continue;
       }
+
+      // Handle other HTTP errors (no retry)
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Dataverse API request failed with status ${response.status}: ${errorText}`,
+        );
+      }
+
+      return response;
     }
 
-    throw lastError || new Error("Failed to send request to Dataverse");
+    throw new Error("Failed to send request to Dataverse");
   }
 
   /**
-   * Send an HTTP request and return response as string
+   * Send an HTTP request and return response as string.
+   * Only retries on 429 (rate limiting) responses.
    */
   async sendRequestString(
     accessToken: string,
     method: string,
     path: string,
     body?: any,
-    additionalHeaders?: Record<string, string>
+    additionalHeaders?: Record<string, string>,
   ): Promise<string> {
     const url = `${this.baseUrl}${path}`;
-    let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= this.config.maxRetries!; attempt++) {
-      try {
-        const headers: Record<string, string> = {
-          Authorization: `Bearer ${accessToken}`,
-          "OData-MaxVersion": "4.0",
-          "OData-Version": "4.0",
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        };
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${accessToken}`,
+        "OData-MaxVersion": "4.0",
+        "OData-Version": "4.0",
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      };
 
-        // Add session token for GET requests (elastic tables strong consistency)
-        if (this.sessionToken && method === "GET") {
-          headers["MSCRM.SessionToken"] = this.sessionToken;
+      // Add session token for GET requests (elastic tables strong consistency)
+      if (this.sessionToken && method === "GET") {
+        headers["MSCRM.SessionToken"] = this.sessionToken;
+      }
+
+      // Merge additional headers if provided
+      if (additionalHeaders) {
+        Object.assign(headers, additionalHeaders);
+      }
+
+      const options: RequestInit = {
+        method,
+        headers,
+        signal: AbortSignal.timeout(this.config.timeoutInSeconds! * 1000),
+      };
+
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+
+      const response = await fetch(url, options);
+
+      // Capture session token if present
+      const sessionToken = response.headers.get("x-ms-session-token");
+      if (sessionToken) {
+        this.sessionToken = sessionToken;
+      }
+
+      // Handle 429 (Too Many Requests) with retry
+      if (response.status === 429) {
+        if (attempt === this.config.maxRetries) {
+          throw new Error("Rate limit exceeded after maximum retries");
         }
+        const retryAfter = response.headers.get("Retry-After");
+        const waitTime = retryAfter
+          ? parseInt(retryAfter, 10) * 1000
+          : Math.pow(2, attempt) * 1000;
 
-        // Merge additional headers if provided
-        if (additionalHeaders) {
-          Object.assign(headers, additionalHeaders);
-        }
-
-        const options: RequestInit = {
-          method,
-          headers,
-          signal: AbortSignal.timeout(this.config.timeoutInSeconds! * 1000),
-        };
-
-        if (body) {
-          options.body = JSON.stringify(body);
-        }
-
-        const response = await fetch(url, options);
-
-        // Capture session token if present
-        const sessionToken = response.headers.get("x-ms-session-token");
-        if (sessionToken) {
-          this.sessionToken = sessionToken;
-        }
-
-        // Handle 429 (Too Many Requests) with retry
-        if (response.status === 429) {
-          const retryAfter = response.headers.get("Retry-After");
-          const waitTime = retryAfter
-            ? parseInt(retryAfter, 10) * 1000
-            : Math.pow(2, attempt) * 1000;
-
-          logger.warn(
-            `Rate limited (429). Retrying after ${waitTime / 1000} seconds...`
-          );
-          await this.sleep(waitTime);
-          continue;
-        }
-
-        // Handle other HTTP errors
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(
-            `Dataverse API request failed with status ${response.status}: ${errorText}`
-          );
-        }
-
-        return await response.text();
-      } catch (error) {
-        lastError = error as Error;
-
-        // Don't retry on abort/timeout or if we've exhausted retries
-        if (
-          error instanceof Error &&
-          (error.name === "AbortError" ||
-            error.name === "TimeoutError" ||
-            attempt === this.config.maxRetries)
-        ) {
-          break;
-        }
-
-        // Exponential backoff for retries
-        const waitTime = Math.pow(2, attempt) * 1000;
         logger.warn(
-          `Request failed (attempt ${attempt + 1}). Retrying after ${
-            waitTime / 1000
-          } seconds...`
+          `Rate limited (429). Retrying after ${waitTime / 1000} seconds...`,
         );
         await this.sleep(waitTime);
+        continue;
       }
+
+      // Handle other HTTP errors (no retry)
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Dataverse API request failed with status ${response.status}: ${errorText}`,
+        );
+      }
+
+      return await response.text();
     }
 
-    throw lastError || new Error("Failed to send request to Dataverse");
+    throw new Error("Failed to send request to Dataverse");
   }
 
   /**
@@ -309,7 +277,7 @@ export class DataverseWebApiService {
   async updateRecord(
     entitySetName: string,
     recordId: string,
-    data: any
+    data: any,
   ): Promise<Response> {
     return this.sendRequest(`${entitySetName}(${recordId})`, "PATCH", data);
   }
@@ -320,11 +288,11 @@ export class DataverseWebApiService {
   async retrieveRecordByAlternateKey(
     entitySetName: string,
     attributeName: string,
-    value: string
+    value: string,
   ): Promise<any> {
     const response = await this.sendRequest(
       `${entitySetName}?$filter=${attributeName} eq '${value}'&$top=2`,
-      "GET"
+      "GET",
     );
     if (response.ok) {
       return response.json();
@@ -338,7 +306,7 @@ export class DataverseWebApiService {
   async getOrganizationBaseCurrencyId(): Promise<string> {
     const response = await this.sendRequest(
       `organizations(${this.organizationId})?$select=_basecurrencyid_value`,
-      "GET"
+      "GET",
     );
     if (response.ok) {
       const org = await response.json();

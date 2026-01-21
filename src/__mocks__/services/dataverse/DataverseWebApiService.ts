@@ -34,7 +34,7 @@ export class DataverseWebApiService {
   async sendRequest(
     path: string,
     method = "GET",
-    body?: any
+    body?: any,
   ): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
     const accessToken = await this.config.getAccessToken();
@@ -62,7 +62,7 @@ export class DataverseWebApiService {
     method: string,
     path: string,
     body?: any,
-    additionalHeaders?: Record<string, string>
+    additionalHeaders?: Record<string, string>,
   ): Promise<string> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {

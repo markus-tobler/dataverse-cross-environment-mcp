@@ -43,7 +43,7 @@ try {
   config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 } catch (error) {
   logger.warn(
-    `Could not load config from ${configPath}, using environment variables`
+    `Could not load config from ${configPath}, using environment variables`,
   );
 }
 
@@ -59,7 +59,10 @@ config = {
     Audience: process.env.AZURE_AD_AUDIENCE || config.AzureAd?.Audience || "",
     ClientSecret:
       process.env.AZURE_AD_CLIENT_SECRET || config.AzureAd?.ClientSecret || "",
-    ManagedIdentityClientId: process.env.AZURE_CLIENT_ID || config.AzureAd?.ManagedIdentityClientId || "",
+    ManagedIdentityClientId:
+      process.env.AZURE_CLIENT_ID ||
+      config.AzureAd?.ManagedIdentityClientId ||
+      "",
   },
   Dataverse: {
     Url: process.env.DATAVERSE_URL || config.Dataverse?.Url || "",
@@ -72,12 +75,12 @@ config = {
     SessionTimeoutMinutes: parseInt(
       process.env.SESSION_TIMEOUT_MINUTES ||
         config.McpServer?.SessionTimeoutMinutes?.toString() ||
-        "60"
+        "60",
     ),
     RequestTimeoutMinutes: parseInt(
       process.env.REQUEST_TIMEOUT_MINUTES ||
         config.McpServer?.RequestTimeoutMinutes?.toString() ||
-        "60"
+        "60",
     ),
   },
 };
@@ -123,7 +126,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   logger.debug(
     `Authorization header: ${
       req.headers.authorization ? "Present (Bearer...)" : "MISSING"
-    }`
+    }`,
   );
   logger.debug(`Content-Type: ${req.headers["content-type"] || "not set"}`);
   logger.debug(`========================\n`);
@@ -139,7 +142,7 @@ app.use(
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     exposedHeaders: ["Mcp-Session-Id"],
-  })
+  }),
 );
 
 // Session management
@@ -154,7 +157,7 @@ app.use(
       secure: process.env.NODE_ENV === "production",
       maxAge: config.McpServer.SessionTimeoutMinutes * 60 * 1000,
     },
-  })
+  }),
 );
 
 // JWT authentication middleware
@@ -246,7 +249,7 @@ app.get(
       code_challenge_methods_supported: ["S256"],
       token_endpoint_auth_methods_supported: ["none", "client_secret_post"],
     });
-  }
+  },
 );
 
 // Dynamic Client Registration endpoint (RFC 7591)
@@ -300,7 +303,15 @@ app.post(
       try {
         await transport.handleRequest(req, res, req.body);
       } catch (error) {
-        logger.error("Error handling MCP request:", error);
+        const user =
+          (req as any)?.auth?.upn ||
+          (req as any)?.auth?.preferred_username ||
+          "Unknown";
+        logger.exception("Error handling MCP request", error, {
+          endpoint: "/mcp",
+          method: "POST",
+          user,
+        });
         if (!res.headersSent) {
           res.status(500).json({
             jsonrpc: "2.0",
@@ -313,7 +324,7 @@ app.post(
         }
       }
     });
-  }
+  },
 );
 
 // Error handler for JWT authentication errors
@@ -327,7 +338,7 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     logger.debug("Request method:", req.method);
     logger.debug(
       "Authorization header:",
-      req.headers.authorization ? "Present (Bearer...)" : "Missing"
+      req.headers.authorization ? "Present (Bearer...)" : "Missing",
     );
     logger.debug("Full error:", JSON.stringify(err, null, 2));
     logger.debug("================================");
@@ -359,7 +370,7 @@ app.get("/mcp", async (req: Request, res: Response) => {
         message: "Method not allowed.",
       },
       id: null,
-    })
+    }),
   );
 });
 
@@ -376,7 +387,7 @@ app.delete("/mcp", async (req: Request, res: Response) => {
         message: "Method not allowed.",
       },
       id: null,
-    })
+    }),
   );
 });
 
@@ -389,6 +400,9 @@ setupServer()
     });
   })
   .catch((error) => {
-    logger.error("Failed to set up the server:", error);
+    logger.exception("Failed to set up the server", error, {
+      component: "server",
+      phase: "startup",
+    });
     process.exit(1);
   });

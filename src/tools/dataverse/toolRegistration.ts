@@ -11,14 +11,57 @@ export interface RequestContextProvider {
 }
 
 /**
+ * Standard error response type for MCP tools
+ */
+interface ToolErrorResponse {
+  [key: string]: unknown;
+  content: Array<{
+    type: "text";
+    text: string;
+  }>;
+}
+
+/**
+ * Format a standard error response for MCP tools
+ */
+function formatToolError(
+  toolName: string,
+  error: Error,
+  additionalContext?: Record<string, any>,
+): ToolErrorResponse {
+  const errorMessage = error.message || "Unknown error occurred";
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(
+          {
+            error: true,
+            error_type: error.name || "Error",
+            tool_name: toolName,
+            message: errorMessage,
+            ...additionalContext,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  };
+}
+
+/**
  * Track MCP tool execution with Application Insights telemetry.
  * Measures execution time and tracks success/failure.
+ * Catches and logs exceptions, returning a formatted error response instead of throwing.
  */
 async function trackToolExecution<T>(
   toolName: string,
   userInfo: string,
   operation: () => Promise<T>,
-): Promise<T> {
+  errorContext?: Record<string, any>,
+): Promise<T | ToolErrorResponse> {
   const startTime = Date.now();
   let success = true;
 
@@ -27,7 +70,20 @@ async function trackToolExecution<T>(
     return result;
   } catch (error) {
     success = false;
-    throw error;
+    // Track the exception in Application Insights
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    logger.exception(`Error executing ${toolName} tool`, errorObj, {
+      toolName,
+      user: userInfo,
+      ...errorContext,
+    });
+    appInsightsService.trackException(errorObj, {
+      toolName,
+      user: userInfo,
+      exceptionContext: `MCP Tool Execution: ${toolName}`,
+    });
+    // Return formatted error response instead of throwing
+    return formatToolError(toolName, errorObj, errorContext);
   } finally {
     const durationMs = Date.now() - startTime;
     appInsightsService.trackToolInvocation(
@@ -336,53 +392,58 @@ export function registerDataverseTools(
         `Executing Search tool for user ${userInfo} with term '${params.searchTerm}' and filter '${filterDisplay}'`,
       );
 
-      return trackToolExecution("search", userInfo, async () => {
-        const req = contextProvider.getContext();
-        const searchResponse = await dataverseClient.search(
-          params.searchTerm,
-          params.tableFilter,
-          params.top || 10,
-          req,
-        );
+      return trackToolExecution(
+        "search",
+        userInfo,
+        async () => {
+          const req = contextProvider.getContext();
+          const searchResponse = await dataverseClient.search(
+            params.searchTerm,
+            params.tableFilter,
+            params.top || 10,
+            req,
+          );
 
-        const content: any[] = [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                search_term: params.searchTerm,
-                table_filter: params.tableFilter,
-                total_record_count: searchResponse.totalRecordCount,
-                results: searchResponse.results.map((r) => ({
-                  table_name: r.tableName,
-                  record_id: r.recordId,
-                  primary_name: r.primaryName,
-                  deep_link: r.deepLink,
-                  attributes: r.attributes,
-                })),
-              },
-              null,
-              2,
-            ),
-          },
-        ];
-
-        searchResponse.results.forEach((r) => {
-          content.push({
-            type: "resource_link",
-            uri: `dataverse:///${r.tableName}/${r.recordId}`,
-            name: r.primaryName || r.recordId,
-            description: `${r.tableName} record`,
-            mimeType: "application/json",
-            annotations: {
-              audience: ["assistant"],
-              priority: 0.8,
+          const content: any[] = [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  search_term: params.searchTerm,
+                  table_filter: params.tableFilter,
+                  total_record_count: searchResponse.totalRecordCount,
+                  results: searchResponse.results.map((r) => ({
+                    table_name: r.tableName,
+                    record_id: r.recordId,
+                    primary_name: r.primaryName,
+                    deep_link: r.deepLink,
+                    attributes: r.attributes,
+                  })),
+                },
+                null,
+                2,
+              ),
             },
-          });
-        });
+          ];
 
-        return { content };
-      });
+          searchResponse.results.forEach((r) => {
+            content.push({
+              type: "resource_link",
+              uri: `dataverse:///${r.tableName}/${r.recordId}`,
+              name: r.primaryName || r.recordId,
+              description: `${r.tableName} record`,
+              mimeType: "application/json",
+              annotations: {
+                audience: ["assistant"],
+                priority: 0.8,
+              },
+            });
+          });
+
+          return { content };
+        },
+        { searchTerm: params.searchTerm, tableFilter: filterDisplay },
+      );
     },
   );
 
@@ -491,7 +552,11 @@ export function registerDataverseTools(
 
         return { content };
       } catch (error: any) {
-        logger.error("Error executing RetrieveRecord tool:", error);
+        logger.exception("Error executing RetrieveRecord tool", error, {
+          toolName: "RetrieveRecord",
+          tableName: params.tableName,
+          recordId: params.recordId,
+        });
 
         if (error.message.includes("Invalid record ID format")) {
           return {
@@ -628,7 +693,10 @@ export function registerDataverseTools(
           ],
         };
       } catch (error: any) {
-        logger.error("Error executing DescribeTable tool:", error);
+        logger.exception("Error executing DescribeTable tool", error, {
+          toolName: "DescribeTable",
+          tableName: params.tableName,
+        });
 
         const errorMessage =
           error.name === "Error" &&
@@ -740,7 +808,10 @@ export function registerDataverseTools(
           ],
         };
       } catch (error: any) {
-        logger.error("Error executing DescribeTableFormat tool:", error);
+        logger.exception("Error executing DescribeTableFormat tool", error, {
+          toolName: "DescribeTableFormat",
+          tableName: params.tableName,
+        });
 
         const errorMessage =
           error.name === "Error" &&
@@ -825,7 +896,10 @@ export function registerDataverseTools(
           ],
         };
       } catch (error: any) {
-        logger.error("Error executing GetPredefinedQueries tool:", error);
+        logger.exception("Error executing GetPredefinedQueries tool", error, {
+          toolName: "GetPredefinedQueries",
+          tableName: params.tableName,
+        });
 
         const errorMessage =
           error.name === "Error" &&
@@ -920,7 +994,11 @@ export function registerDataverseTools(
           ],
         };
       } catch (error: any) {
-        logger.error("Error executing RunPredefinedQuery tool:", error);
+        logger.exception("Error executing RunPredefinedQuery tool", error, {
+          toolName: "RunPredefinedQuery",
+          queryIdOrName: params.queryIdOrName,
+          tableName: params.tableName,
+        });
 
         const errorMessage =
           error.name === "Error" &&
@@ -1020,7 +1098,10 @@ export function registerDataverseTools(
           ],
         };
       } catch (error: any) {
-        logger.error("Error executing RunCustomQuery tool:", error);
+        logger.exception("Error executing RunCustomQuery tool", error, {
+          toolName: "RunCustomQuery",
+          tableName: params.tableName,
+        });
 
         // Extract Dataverse service error details if available
         let dataverseErrorDetails = null;
@@ -1126,7 +1207,10 @@ export function registerDataverseTools(
           ],
         };
       } catch (error: any) {
-        logger.error("Error executing CreateRecord tool:", error);
+        logger.exception("Error executing CreateRecord tool", error, {
+          toolName: "CreateRecord",
+          table: params.table,
+        });
         return {
           content: [
             {
@@ -1184,7 +1268,11 @@ export function registerDataverseTools(
           ],
         };
       } catch (error: any) {
-        logger.error("Error executing UpdateRecord tool:", error);
+        logger.exception("Error executing UpdateRecord tool", error, {
+          toolName: "UpdateRecord",
+          table: params.table,
+          recordId: params.record_id,
+        });
         return {
           content: [
             {

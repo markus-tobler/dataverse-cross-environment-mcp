@@ -246,7 +246,7 @@ class ApplicationInsightsService {
   }
 
   /**
-   * Track Dataverse API operation
+   * Track Dataverse API operation with optional exception tracking
    */
   trackDataverseOperation(
     operation: string,
@@ -254,6 +254,7 @@ class ApplicationInsightsService {
     durationMs: number,
     success: boolean,
     properties?: TelemetryProperties,
+    error?: Error,
   ): void {
     if (!this.tracer) return;
 
@@ -270,7 +271,10 @@ class ApplicationInsightsService {
     }
 
     if (!success) {
-      span.setStatus({ code: SpanStatusCode.ERROR });
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error?.message });
+      if (error) {
+        span.recordException(error);
+      }
     }
 
     span.end();
@@ -310,5 +314,51 @@ class ApplicationInsightsService {
   }
 }
 
+/**
+ * Setup global exception handlers for uncaught exceptions and unhandled promise rejections.
+ * These handlers ensure that unexpected errors are logged to Application Insights before the process exits.
+ */
+function setupGlobalExceptionHandlers(
+  service: ApplicationInsightsService,
+): void {
+  process.on("uncaughtException", (error: Error) => {
+    console.error("[CRITICAL] Uncaught Exception:", error);
+    service.trackException(error, {
+      exceptionType: "uncaughtException",
+      severity: "critical",
+    });
+    // Give time for telemetry to flush before exiting
+    service.flush().finally(() => {
+      process.exit(1);
+    });
+  });
+
+  process.on(
+    "unhandledRejection",
+    (reason: unknown, promise: Promise<unknown>) => {
+      const error =
+        reason instanceof Error ? reason : new Error(String(reason));
+      console.error("[CRITICAL] Unhandled Promise Rejection:", error);
+      service.trackException(error, {
+        exceptionType: "unhandledRejection",
+        severity: "critical",
+      });
+    },
+  );
+
+  // Graceful shutdown handling
+  const gracefulShutdown = async (signal: string) => {
+    console.log(`Received ${signal}. Flushing telemetry and shutting down...`);
+    await service.flush();
+    process.exit(0);
+  };
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+}
+
 // Export singleton instance
 export const appInsightsService = new ApplicationInsightsService();
+
+// Setup global exception handlers when the module is loaded
+setupGlobalExceptionHandlers(appInsightsService);

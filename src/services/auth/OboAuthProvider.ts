@@ -32,11 +32,11 @@ export class OboAuthProvider {
         config.AzureAd.ManagedIdentityClientId || process.env.AZURE_CLIENT_ID;
       if (!managedIdentityClientId) {
         throw new Error(
-          "AZURE_CLIENT_ID environment variable is required when using Managed Identity"
+          "AZURE_CLIENT_ID environment variable is required when using Managed Identity",
         );
       }
       this.managedIdentityCredential = new ManagedIdentityCredential(
-        managedIdentityClientId
+        managedIdentityClientId,
       );
 
       // Create MSAL client with client assertion callback
@@ -81,22 +81,25 @@ export class OboAuthProvider {
 
       logger.debug(`Requesting client assertion token with scope: ${scope}`);
 
-      const tokenResponse = await this.managedIdentityCredential.getToken(
-        scope
-      );
+      const tokenResponse =
+        await this.managedIdentityCredential.getToken(scope);
 
       if (!tokenResponse || !tokenResponse.token) {
         throw new Error("Failed to acquire token from Managed Identity");
       }
 
       logger.debug(
-        "Successfully acquired client assertion from Managed Identity"
+        "Successfully acquired client assertion from Managed Identity",
       );
       return tokenResponse.token;
     } catch (error) {
-      logger.error(
-        "Error acquiring client assertion from Managed Identity:",
-        error
+      logger.exception(
+        "Error acquiring client assertion from Managed Identity",
+        error,
+        {
+          component: "OboAuthProvider",
+          operation: "getClientAssertion",
+        },
       );
       throw error;
     }
@@ -132,7 +135,7 @@ export class OboAuthProvider {
       ];
 
       const isValidIssuer = validIssuers.some((issuer) =>
-        payload.iss!.toLowerCase().includes(issuer)
+        payload.iss!.toLowerCase().includes(issuer),
       );
 
       if (!isValidIssuer) {
@@ -142,7 +145,10 @@ export class OboAuthProvider {
 
       return payload;
     } catch (error) {
-      logger.error("Token validation failed:", error);
+      logger.exception("Token validation failed", error, {
+        component: "OboAuthProvider",
+        operation: "validateUserToken",
+      });
       throw new Error("Invalid user token");
     }
   }
@@ -181,9 +187,8 @@ export class OboAuthProvider {
         scopes: [`${this.dataverseUrl}/.default`],
       };
 
-      const response = await this.confidentialClient.acquireTokenOnBehalfOf(
-        oboRequest
-      );
+      const response =
+        await this.confidentialClient.acquireTokenOnBehalfOf(oboRequest);
 
       if (!response || !response.accessToken || !response.expiresOn) {
         throw new Error("Failed to acquire Dataverse token via OBO flow");
@@ -196,11 +201,14 @@ export class OboAuthProvider {
       });
 
       logger.debug(
-        `Acquired and cached Dataverse access token for user ${userId} via OBO flow`
+        `Acquired and cached Dataverse access token for user ${userId} via OBO flow`,
       );
       return response.accessToken;
     } catch (error) {
-      logger.error("Error acquiring token via OBO flow:", error);
+      logger.exception("Error acquiring token via OBO flow", error, {
+        component: "OboAuthProvider",
+        operation: "getAccessToken",
+      });
       throw error;
     }
   }
