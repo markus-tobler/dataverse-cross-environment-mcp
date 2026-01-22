@@ -75,6 +75,8 @@ The MCP Server must expose an API that the Connector App will call.
    - **State**: `Enabled`
 7. Click **Add scope**
 
+> **Note**: The full scope will be in the format `api://<client-id>/mcp:tools` (e.g., `api://b52b5b7a-e895-4600-b567-2c4cbe27d2e7/mcp:tools`). You'll need this complete scope when configuring the custom connector.
+
 ## Step 2: Deploy the Server to Azure
 
 Deploy the MCP Server to Azure Container Apps using Azure Developer CLI.
@@ -122,7 +124,6 @@ This is the critical step to enable secret-less authentication. You will link yo
 > The Federated Credential establishes trust between these two identities, allowing the Managed Identity to obtain tokens on behalf of the App Registration.
 
 1. **Find the Managed Identity Client ID**:
-
    - In the [Azure Portal](https://portal.azure.com), navigate to the resource group created by `azd` (e.g., `rg-dataverse-mcp`).
    - Find the **User-Assigned Managed Identity**. Its name will be similar to `uai-dataverse-mcp-<unique_string>`.
    - Click on it, and from the **Overview** page, copy its **Client ID**.
@@ -200,7 +201,43 @@ The Connector App needs permission to call the MCP Server API.
 6. Select **Delegated permissions**
 7. Check the `mcp:tools` scope you created earlier
 8. Click **Add permissions**
-9. If required, click **Grant admin consent**
+9. Click **Grant admin consent for [your organization]** (required for OBO flow)
+
+> **Important**: Ensure you select **Delegated permissions** (not Application permissions) since OBO authentication requires acting on behalf of the signed-in user.
+
+### 3.4 Expose an API for the Connector App
+
+To enable OBO authentication, the Connector App must expose a scope and authorize the Azure API Connections service principal.
+
+1. In your Connector App registration, go to **Expose an API**
+2. Click **Add** next to "Application ID URI"
+3. Accept the default value (`api://<connector-client-id>`) or customize it
+4. Click **Save**
+5. Click **Add a scope**
+6. Configure the scope:
+   - **Scope name**: `access_as_user`
+   - **Who can consent**: `Admins and users`
+   - **Admin consent display name**: `Allow Azure API Connections to obtain tokens on behalf of users`
+   - **Admin consent description**: `Allows the Azure API Connections service to obtain tokens on behalf of the user`
+   - **User consent display name**: `Allow connector to act on your behalf`
+   - **User consent description**: `Allows the Azure API Connections service to obtain tokens and access resources on your behalf`
+   - **State**: `Enabled`
+7. Click **Add scope**
+
+### 3.5 Authorize Azure API Connections Service Principal
+
+This step allows the Azure API Connections service to obtain tokens on behalf of users without requiring explicit sign-in each time.
+
+1. In the **Expose an API** blade, scroll down to **Authorized client applications**
+2. Click **Add a client application**
+3. Enter the client ID: `fe053c5f-3692-4f14-aef2-ee34fc081cae`
+
+   > This is the Microsoft Azure API Connections service principal ID
+
+4. Select the `access_as_user` scope you just created
+5. Click **Add application**
+
+> **Note**: If you encounter errors when authorizing the service principal, it may not be provisioned in your tenant yet. Contact your tenant administrator to provision it. See [Microsoft's documentation on provisioning Azure API Connections service principal](https://learn.microsoft.com/en-us/power-apps/maker/canvas-apps/add-manage-connections#step-1-provision-microsofts-azure-api-connections-service-principal-in-your-microsoft-entra-tenant) for details.
 
 ## Step 4: Create a Custom Connector in Power Platform
 
@@ -258,8 +295,10 @@ Now that the connector has been created and generated a redirect URL, you need t
 3. Go to **Authentication**.
 4. Click **Add a platform**.
 5. Select **Web**.
-6. Enter the **Redirect URL** you copied from the Power Platform connector.
+6. Enter the **Redirect URL** you copied from the Power Platform connector (e.g., `https://global.consent.azure-apim.net/redirect/mcp-2dstreamable-2dhttp-5f...`).
 7. Click **Configure**.
+
+> **Verification**: After adding the redirect URI, you should see it listed under the "Web" platform in the Authentication blade.
 
 ### 4.6 Configure Federated Credential for Connector App
 
@@ -287,9 +326,19 @@ Now, you will configure the `Dataverse MCP Connector` App Registration to trust 
 3. Go to the **Test** tab.
 4. Click **New connection**.
 5. Sign in with a user account that has Dataverse access. The connection should now succeed without prompting for a secret.
-6. Test operations to verify connectivity.
+6. Test Share the Custom Connector
 
-### 4.8 Use in Copilot Studio
+After configuring your custom connector, share it with appropriate users so they can use it in agent conversations.
+
+1. In the Power Platform Maker Portal, navigate to your custom connector
+2. Click **Share** (or navigate to **Connections** > **Custom connectors**)
+3. Share with the appropriate users based on their role:
+   - **Can edit**: Grant to makers who need to configure and manage the connector within agents
+   - **Can view**: Grant to end users who will sign in and use the connector during agent conversations
+
+For detailed instructions, see [Share a custom connector in your organization](https://learn.microsoft.com/en-us/connectors/custom-connectors/share).
+
+### 4.9 Use in Copilot Studio
 
 1. Navigate to [Copilot Studio](https://copilotstudio.microsoft.com)
 2. Create or open a Copilot
@@ -298,6 +347,32 @@ Now, you will configure the `Dataverse MCP Connector` App Registration to trust 
 5. Choose your Dataverse MCP connector
 6. Select the operations you want to use
 7. Configure and test your Copilot with the MCP Server
+
+> **Note**: The first time a user interacts with an action that uses the connector, they'll be prompted to grant consent. After granting consent once, subsequent interactions will work transparently.
+
+#### Azure API Connections Service Principal Not Found
+
+If you receive errors about the Azure API Connections service principal (`fe053c5f-3692-4f14-aef2-ee34fc081cae`) not being found:
+
+- The service principal may not be provisioned in your tenant yet
+- Contact your tenant administrator to provision it
+- See [Microsoft's documentation](https://learn.microsoft.com/en-us/power-apps/maker/canvas-apps/add-manage-connections#step-1-provision-microsofts-azure-api-connections-service-principal-in-your-microsoft-entra-tenant) for provisioning instructions
+
+#### User Consent Prompt Appears Every Time
+
+If users are repeatedly prompted to grant consent:
+
+- Verify the Azure API Connections service principal (`fe053c5f-3692-4f14-aef2-ee34fc081cae`) is authorized in the Connector App's **Expose an API** > **Authorized client applications** section
+- Ensure the `access_as_user` scope is selected for the authorized client
+- Check that admin consent has been granted for all API permissions
+
+#### Scope Format Errors
+
+Ensure scopes are formatted correctly:
+
+- **MCP Server scope**: `api://<server-app-client-id>/mcp:tools`
+- **Connector App scope**: `api://<connector-app-client-id>/access_as_user`
+- In the Power Platform connector configuration, use the full scope format including the `api://` prefix
 
 ## Troubleshooting
 
