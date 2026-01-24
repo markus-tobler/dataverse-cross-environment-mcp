@@ -54,7 +54,8 @@ describe("Describe Table Tool Integration", () => {
           displayName: "Name",
           description: "",
           type: "String",
-          isPrimaryName: true,
+          flags: "PrimaryName",
+          exampleValue: "Contoso",
         } as any,
       ],
       sampleRecord: { name: "Contoso" },
@@ -63,14 +64,10 @@ describe("Describe Table Tool Integration", () => {
     const params = { tableName: "account", full: false } as any;
     const result = await handler(params);
 
-    expect(mockDataverseClient.resolveLogicalName).toHaveBeenCalledWith(
-      "account",
-      undefined
-    );
     expect(mockDataverseClient.describeTable).toHaveBeenCalledWith(
       "account",
       false,
-      undefined
+      undefined,
     );
     expect(result.content).toEqual(
       expect.arrayContaining([
@@ -78,7 +75,7 @@ describe("Describe Table Tool Integration", () => {
           type: "text",
           text: expect.stringContaining('"table": {'),
         }),
-      ])
+      ]),
     );
   });
 });

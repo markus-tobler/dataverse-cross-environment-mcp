@@ -59,7 +59,7 @@ describe("Tool Registration Integration Tests", () => {
           type: "text",
           text: expect.stringContaining(whoAmIResponse.UserId),
         }),
-      ])
+      ]),
     );
   });
 
@@ -86,9 +86,9 @@ describe("Tool Registration Integration Tests", () => {
     const result = await handler(searchParams);
     expect(mockDataverseClient.search).toHaveBeenCalledWith(
       "test search",
-      undefined,
       5,
-      undefined
+      undefined,
+      undefined,
     );
     expect(result.content).toEqual(
       expect.arrayContaining([
@@ -96,7 +96,7 @@ describe("Tool Registration Integration Tests", () => {
           type: "text",
           text: expect.stringContaining('"total_record_count": 1'),
         }),
-      ])
+      ]),
     );
   });
 });

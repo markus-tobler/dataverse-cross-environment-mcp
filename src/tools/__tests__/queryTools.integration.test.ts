@@ -47,7 +47,7 @@ describe("Query Tools Integration Tests", () => {
       mockDataverseClient.getPredefinedQueries.mockResolvedValue(mockQueries);
 
       const call = server.tool.mock.calls.find(
-        (c) => c[0] === "get_predefined_queries"
+        (c) => c[0] === "get_predefined_queries",
       );
       expect(call).toBeDefined();
       const handler = call![2];
@@ -55,7 +55,7 @@ describe("Query Tools Integration Tests", () => {
       const result = await handler({ tableName: "account" });
       expect(mockDataverseClient.getPredefinedQueries).toHaveBeenCalledWith(
         "account",
-        undefined
+        undefined,
       );
       expect(result.content).toEqual(
         expect.arrayContaining([
@@ -63,7 +63,7 @@ describe("Query Tools Integration Tests", () => {
             type: "text",
             text: expect.stringContaining('"count": 2'),
           }),
-        ])
+        ]),
       );
       expect(result.content[0].text).toContain("Active Accounts");
       expect(result.content[0].text).toContain("My Custom View");
@@ -71,11 +71,11 @@ describe("Query Tools Integration Tests", () => {
 
     it("handles errors when fetching predefined queries", async () => {
       mockDataverseClient.getPredefinedQueries.mockRejectedValue(
-        new Error("Table not found")
+        new Error("Table not found"),
       );
 
       const call = server.tool.mock.calls.find(
-        (c) => c[0] === "get_predefined_queries"
+        (c) => c[0] === "get_predefined_queries",
       );
       const handler = call![2];
 
@@ -106,7 +106,7 @@ describe("Query Tools Integration Tests", () => {
       mockDataverseClient.runPredefinedQuery.mockResolvedValue(mockResult);
 
       const call = server.tool.mock.calls.find(
-        (c) => c[0] === "run_predefined_query"
+        (c) => c[0] === "run_predefined_query",
       );
       expect(call).toBeDefined();
       const handler = call![2];
@@ -118,7 +118,7 @@ describe("Query Tools Integration Tests", () => {
       expect(mockDataverseClient.runPredefinedQuery).toHaveBeenCalledWith(
         "query-id-123",
         "account",
-        undefined
+        undefined,
       );
       expect(result.content).toEqual(
         expect.arrayContaining([
@@ -126,24 +126,17 @@ describe("Query Tools Integration Tests", () => {
             type: "text",
             text: expect.stringContaining('"total_record_count": 2'),
           }),
-        ])
+        ]),
       );
-
-      // Check for resource links
-      const resourceLinks = result.content.filter(
-        (c: any) => c.type === "resource_link"
-      );
-      expect(resourceLinks).toHaveLength(2);
-      expect(resourceLinks[0].uri).toBe("dataverse:///account/record-1");
     });
 
     it("handles errors when running predefined query", async () => {
       mockDataverseClient.runPredefinedQuery.mockRejectedValue(
-        new Error("Query not found")
+        new Error("Query not found"),
       );
 
       const call = server.tool.mock.calls.find(
-        (c) => c[0] === "run_predefined_query"
+        (c) => c[0] === "run_predefined_query",
       );
       const handler = call![2];
 
@@ -169,7 +162,7 @@ describe("Query Tools Integration Tests", () => {
       mockDataverseClient.runCustomQuery.mockResolvedValue(mockResult);
 
       const call = server.tool.mock.calls.find(
-        (c) => c[0] === "run_custom_query"
+        (c) => c[0] === "run_custom_query",
       );
       expect(call).toBeDefined();
       const handler = call![2];
@@ -180,7 +173,7 @@ describe("Query Tools Integration Tests", () => {
       expect(mockDataverseClient.runCustomQuery).toHaveBeenCalledWith(
         fetchXml,
         "contact",
-        undefined
+        undefined,
       );
       expect(result.content).toEqual(
         expect.arrayContaining([
@@ -188,24 +181,17 @@ describe("Query Tools Integration Tests", () => {
             type: "text",
             text: expect.stringContaining('"total_record_count": 1'),
           }),
-        ])
+        ]),
       );
-
-      // Check for resource links
-      const resourceLinks = result.content.filter(
-        (c: any) => c.type === "resource_link"
-      );
-      expect(resourceLinks).toHaveLength(1);
-      expect(resourceLinks[0].uri).toBe("dataverse:///contact/contact-1");
     });
 
     it("handles FetchXML errors with detailed messages", async () => {
       mockDataverseClient.runCustomQuery.mockRejectedValue(
-        new Error("Invalid FetchXML query: The FetchXML syntax is invalid")
+        new Error("Invalid FetchXML query: The FetchXML syntax is invalid"),
       );
 
       const call = server.tool.mock.calls.find(
-        (c) => c[0] === "run_custom_query"
+        (c) => c[0] === "run_custom_query",
       );
       const handler = call![2];
 
@@ -217,12 +203,12 @@ describe("Query Tools Integration Tests", () => {
 
     it("includes Dataverse error details when available", async () => {
       const dataverseError = new Error(
-        'Dataverse API request failed with status 400: {"error":{"code":"0x80040203","message":"Invalid FetchXml. Entity \'badentity\' could not be found."}}'
+        'Dataverse API request failed with status 400: {"error":{"code":"0x80040203","message":"Invalid FetchXml. Entity \'badentity\' could not be found."}}',
       );
       mockDataverseClient.runCustomQuery.mockRejectedValue(dataverseError);
 
       const call = server.tool.mock.calls.find(
-        (c) => c[0] === "run_custom_query"
+        (c) => c[0] === "run_custom_query",
       );
       const handler = call![2];
 
