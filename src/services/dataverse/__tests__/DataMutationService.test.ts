@@ -42,20 +42,14 @@ describe("DataMutationService", () => {
             logicalName: "accountid",
             displayName: "Account ID",
             type: "Uniqueidentifier",
-            isPrimaryId: true,
-            isPrimaryName: false,
-            isRequired: false,
-            isReadOnly: true,
+            flags: "PrimaryId|ReadOnly",
             exampleValue: "00000000-0000-0000-0000-000000000000",
           },
           {
             logicalName: "name",
             displayName: "Account Name",
             type: "String",
-            isPrimaryId: false,
-            isPrimaryName: true,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "PrimaryName|Required",
             exampleValue: "Contoso Ltd",
           },
         ],
@@ -75,7 +69,7 @@ describe("DataMutationService", () => {
           get: jest
             .fn()
             .mockReturnValue(
-              "https://fake.crm.dynamics.com/api/data/v9.2/accounts(12345678-1234-1234-1234-123456789abc)"
+              "https://fake.crm.dynamics.com/api/data/v9.2/accounts(12345678-1234-1234-1234-123456789abc)",
             ),
         },
       });
@@ -87,14 +81,14 @@ describe("DataMutationService", () => {
       const recordId = await mutationService.createRecord(
         mockWebApiService,
         "account",
-        recordData
+        recordData,
       );
 
       expect(recordId).toBe("12345678-1234-1234-1234-123456789abc");
       expect(mockMetadataService.describeTable).toHaveBeenCalledWith(
         mockWebApiService,
         "account",
-        true
+        true,
       );
     });
 
@@ -109,30 +103,21 @@ describe("DataMutationService", () => {
             logicalName: "accountid",
             displayName: "Account ID",
             type: "Uniqueidentifier",
-            isPrimaryId: true,
-            isPrimaryName: false,
-            isRequired: false,
-            isReadOnly: true,
+            flags: "PrimaryId|ReadOnly",
             exampleValue: "00000000-0000-0000-0000-000000000000",
           },
           {
             logicalName: "name",
             displayName: "Account Name",
             type: "String",
-            isPrimaryId: false,
-            isPrimaryName: true,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "PrimaryName|Required",
             exampleValue: "Contoso Ltd",
           },
           {
             logicalName: "emailaddress1",
             displayName: "Email",
             type: "String",
-            isPrimaryId: false,
-            isPrimaryName: false,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "Required",
             exampleValue: "test@example.com",
           },
         ],
@@ -149,11 +134,11 @@ describe("DataMutationService", () => {
       };
 
       await expect(
-        mutationService.createRecord(mockWebApiService, "account", recordData)
+        mutationService.createRecord(mockWebApiService, "account", recordData),
       ).rejects.toThrow(/Missing required attributes/);
 
       await expect(
-        mutationService.createRecord(mockWebApiService, "account", recordData)
+        mutationService.createRecord(mockWebApiService, "account", recordData),
       ).rejects.toThrow(/emailaddress1 \(Email\)/);
     });
 
@@ -168,40 +153,28 @@ describe("DataMutationService", () => {
             logicalName: "contactid",
             displayName: "Contact ID",
             type: "Uniqueidentifier",
-            isPrimaryId: true,
-            isPrimaryName: false,
-            isRequired: false,
-            isReadOnly: true,
+            flags: "PrimaryId|ReadOnly",
             exampleValue: "00000000-0000-0000-0000-000000000000",
           },
           {
             logicalName: "firstname",
             displayName: "First Name",
             type: "String",
-            isPrimaryId: false,
-            isPrimaryName: false,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "Required",
             exampleValue: "John",
           },
           {
             logicalName: "lastname",
             displayName: "Last Name",
             type: "String",
-            isPrimaryId: false,
-            isPrimaryName: false,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "Required",
             exampleValue: "Doe",
           },
           {
             logicalName: "emailaddress1",
             displayName: "Email",
             type: "String",
-            isPrimaryId: false,
-            isPrimaryName: false,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "Required",
             exampleValue: "test@example.com",
           },
         ],
@@ -218,7 +191,7 @@ describe("DataMutationService", () => {
       };
 
       await expect(
-        mutationService.createRecord(mockWebApiService, "contact", recordData)
+        mutationService.createRecord(mockWebApiService, "contact", recordData),
       ).rejects.toThrow(/Missing required attributes/);
 
       const error = await mutationService
@@ -241,30 +214,21 @@ describe("DataMutationService", () => {
             logicalName: "accountid",
             displayName: "Account ID",
             type: "Uniqueidentifier",
-            isPrimaryId: true,
-            isPrimaryName: false,
-            isRequired: true,
-            isReadOnly: true,
+            flags: "PrimaryId|Required|ReadOnly",
             exampleValue: "00000000-0000-0000-0000-000000000000",
           },
           {
             logicalName: "name",
             displayName: "Account Name",
             type: "String",
-            isPrimaryId: false,
-            isPrimaryName: true,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "PrimaryName|Required",
             exampleValue: "Contoso Ltd",
           },
           {
             logicalName: "createdon",
             displayName: "Created On",
             type: "DateTime",
-            isPrimaryId: false,
-            isPrimaryName: false,
-            isRequired: true,
-            isReadOnly: true,
+            flags: "Required|ReadOnly",
             exampleValue: "2024-01-01T00:00:00Z",
           },
         ],
@@ -284,7 +248,7 @@ describe("DataMutationService", () => {
           get: jest
             .fn()
             .mockReturnValue(
-              "https://fake.crm.dynamics.com/api/data/v9.2/accounts(12345678-1234-1234-1234-123456789abc)"
+              "https://fake.crm.dynamics.com/api/data/v9.2/accounts(12345678-1234-1234-1234-123456789abc)",
             ),
         },
       });
@@ -297,7 +261,7 @@ describe("DataMutationService", () => {
       const recordId = await mutationService.createRecord(
         mockWebApiService,
         "account",
-        recordData
+        recordData,
       );
 
       expect(recordId).toBe("12345678-1234-1234-1234-123456789abc");
@@ -314,30 +278,21 @@ describe("DataMutationService", () => {
             logicalName: "contactid",
             displayName: "Contact ID",
             type: "Uniqueidentifier",
-            isPrimaryId: true,
-            isPrimaryName: false,
-            isRequired: false,
-            isReadOnly: true,
+            flags: "PrimaryId|ReadOnly",
             exampleValue: "00000000-0000-0000-0000-000000000000",
           },
           {
             logicalName: "firstname",
             displayName: "First Name",
             type: "String",
-            isPrimaryId: false,
-            isPrimaryName: false,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "Required",
             exampleValue: "John",
           },
           {
             logicalName: "parentcustomerid",
             displayName: "Parent Customer",
             type: "Lookup",
-            isPrimaryId: false,
-            isPrimaryName: false,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "Required",
             exampleValue: "12345678-1234-1234-1234-123456789abc",
             targets: ["account", "contact"],
           },
@@ -358,7 +313,7 @@ describe("DataMutationService", () => {
           get: jest
             .fn()
             .mockReturnValue(
-              "https://fake.crm.dynamics.com/api/data/v9.2/contacts(12345678-1234-1234-1234-123456789abc)"
+              "https://fake.crm.dynamics.com/api/data/v9.2/contacts(12345678-1234-1234-1234-123456789abc)",
             ),
         },
       });
@@ -372,7 +327,7 @@ describe("DataMutationService", () => {
       const recordId = await mutationService.createRecord(
         mockWebApiService,
         "contact",
-        recordData
+        recordData,
       );
 
       expect(recordId).toBe("12345678-1234-1234-1234-123456789abc");
@@ -389,30 +344,21 @@ describe("DataMutationService", () => {
             logicalName: "opportunityid",
             displayName: "Opportunity ID",
             type: "Uniqueidentifier",
-            isPrimaryId: true,
-            isPrimaryName: false,
-            isRequired: false,
-            isReadOnly: true,
+            flags: "PrimaryId|ReadOnly",
             exampleValue: "00000000-0000-0000-0000-000000000000",
           },
           {
             logicalName: "name",
             displayName: "Topic",
             type: "String",
-            isPrimaryId: false,
-            isPrimaryName: true,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "PrimaryName|Required",
             exampleValue: "Test Opportunity",
           },
           {
             logicalName: "transactioncurrencyid",
             displayName: "Currency",
             type: "Lookup",
-            isPrimaryId: false,
-            isPrimaryName: false,
-            isRequired: true,
-            isReadOnly: false,
+            flags: "Required",
             exampleValue: "12345678-1234-1234-1234-123456789abc",
             targets: ["transactioncurrency"],
           },
@@ -433,7 +379,7 @@ describe("DataMutationService", () => {
           get: jest
             .fn()
             .mockReturnValue(
-              "https://fake.crm.dynamics.com/api/data/v9.2/opportunities(12345678-1234-1234-1234-123456789abc)"
+              "https://fake.crm.dynamics.com/api/data/v9.2/opportunities(12345678-1234-1234-1234-123456789abc)",
             ),
         },
       });
@@ -446,7 +392,7 @@ describe("DataMutationService", () => {
       const recordId = await mutationService.createRecord(
         mockWebApiService,
         "opportunity",
-        recordData
+        recordData,
       );
 
       expect(recordId).toBe("12345678-1234-1234-1234-123456789abc");

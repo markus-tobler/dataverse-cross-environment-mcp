@@ -262,19 +262,24 @@ Lists all Dataverse tables accessible to the authenticated user.
 
 ### search
 
-Searches for records across Dataverse tables using the Dataverse Search API.
+Searches for records across Dataverse tables using the Dataverse Search API. The top 15 ranked results are automatically enriched with complete record data for better context.
 
 **Parameters:**
 
 - `searchTerm` (string, required): The term to search for
-- `tableFilter` (string, optional): Limit search to specific table (e.g., `account`)
-- `top` (number, optional): Maximum results to return (default: 10)
+- `tableFilter` (string | string[], optional): Limit search to specific table(s) (e.g., `account` or `['account', 'contact']`)
+- `top` (number, optional): Maximum results to return (default: 100)
 
 **Returns:**
 
-- Array of matching records with basic information
-- Total record count
-- Deep links to records
+- Array of matching records with:
+  - Basic information (record_id, primary_name, deep_link)
+  - `enriched`: Boolean indicating if record was enriched with full data
+  - `attributes`: For top 15 results, complete record with all important attributes and formatted values; for remaining results, basic search attributes
+- `total_record_count`: Total number of matching records
+- `enriched_count`: Number of results that were successfully enriched
+
+**Note:** The search tool automatically retrieves full record details for the top 15 results to provide richer context without requiring separate retrieve_record calls. Results beyond the top 15 contain only basic search attributes.
 
 ### retrieve_record
 

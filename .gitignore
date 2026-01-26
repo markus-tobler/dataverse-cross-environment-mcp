@@ -28,3 +28,4 @@ logs/
 .ntvs_analysis.dat
 node_modules/
 samples/
+run-stdio.bat

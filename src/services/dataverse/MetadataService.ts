@@ -166,6 +166,55 @@ export class MetadataService {
 
     const entityMetadata = JSON.parse(metadataResponse);
     const attributes: AttributeMetadata[] = entityMetadata.Attributes || [];
+
+    // Fetch OptionSet metadata for picklist attributes
+    const picklistAttributes = attributes.filter(
+      (attr) =>
+        attr.AttributeTypeName?.Value === "PicklistType" ||
+        attr.AttributeTypeName?.Value === "StateType" ||
+        attr.AttributeTypeName?.Value === "StatusType",
+    );
+
+    for (const picklistAttr of picklistAttributes) {
+      try {
+        let picklistResponse: string;
+        if (picklistAttr.AttributeTypeName?.Value === "StateType") {
+          picklistResponse = await service.sendRequestString(
+            accessToken,
+            "GET",
+            `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${picklistAttr.LogicalName}')/Microsoft.Dynamics.CRM.StateAttributeMetadata?$select=LogicalName&$expand=OptionSet`,
+          );
+        } else if (picklistAttr.AttributeTypeName?.Value === "StatusType") {
+          picklistResponse = await service.sendRequestString(
+            accessToken,
+            "GET",
+            `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${picklistAttr.LogicalName}')/Microsoft.Dynamics.CRM.StatusAttributeMetadata?$select=LogicalName&$expand=OptionSet`,
+          );
+        } else {
+          picklistResponse = await service.sendRequestString(
+            accessToken,
+            "GET",
+            `EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${picklistAttr.LogicalName}')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet`,
+          );
+        }
+        const picklistData = JSON.parse(picklistResponse);
+
+        // Merge the OptionSet data into the attribute
+        const attrIndex = attributes.findIndex(
+          (a) => a.LogicalName === picklistAttr.LogicalName,
+        );
+        if (attrIndex !== -1) {
+          attributes[attrIndex].OptionSet =
+            picklistData.OptionSet || picklistData.GlobalOptionSet;
+        }
+      } catch (error) {
+        logger.warn(
+          `Could not fetch OptionSet metadata for ${picklistAttr.LogicalName}:`,
+          error,
+        );
+      }
+    }
+
     let importantFields: string[] = [];
     if (!full) {
       importantFields = await this.determineImportantFields(
@@ -223,6 +272,16 @@ export class MetadataService {
     accessToken: string,
   ): Promise<string[]> {
     try {
+      // Get the logical name from entity set name
+      const logicalName = await this.resolveLogicalName(service, entitySetName);
+
+      // Fetch fields used in system views
+      const viewFields = await this.getFieldsFromViews(
+        logicalName,
+        service,
+        accessToken,
+      );
+
       const modifiedOnAttr = attributes.find(
         (a) => a.LogicalName === "modifiedon",
       );
@@ -238,7 +297,7 @@ export class MetadataService {
       const records = data.value || [];
 
       if (records.length === 0) {
-        return this.getImportantFieldsFromMetadata(attributes);
+        return this.getImportantFieldsFromMetadata(attributes, viewFields);
       }
 
       // Debug: Log attributes that appear in records but might be computed
@@ -305,6 +364,22 @@ export class MetadataService {
         }
       }
 
+      // Common system fields to exclude from fill rate calculations
+      const systemFields = new Set([
+        "createdon",
+        "modifiedon",
+        "createdby",
+        "modifiedby",
+        "owningbusinessunit",
+        "owninguser",
+        "owningteam",
+        "versionnumber",
+        "importsequencenumber",
+        "overriddencreatedon",
+        "timezoneruleversionnumber",
+        "utcconversiontimezonecode",
+      ]);
+
       const fieldScores: Map<string, FieldImportance> = new Map();
 
       // Only score attributes that are in our selectable set
@@ -325,31 +400,47 @@ export class MetadataService {
           attr.RequiredLevel?.Value === "ApplicationRequired" ||
           attr.RequiredLevel?.Value === "SystemRequired"
         ) {
-          score += 100;
+          score += 200;
           reasons.push("required");
         }
 
-        const nonNullCount = records.filter(
-          (r: any) => r[attr.LogicalName] != null && r[attr.LogicalName] !== "",
-        ).length;
-        const fillRate = nonNullCount / records.length;
-
-        if (fillRate > 0.5) {
-          score += fillRate * 50;
-          reasons.push(`${Math.round(fillRate * 100)}% populated`);
+        // Check if field appears in views
+        if (viewFields.has(logicalName)) {
+          score += 200;
+          reasons.push("used in views");
         }
 
-        const importantNames = [
-          "name",
-          "title",
-          "subject",
-          "email",
-          "phone",
-          "status",
-          "state",
-        ];
-        if (importantNames.some((n) => attr.LogicalName.includes(n))) {
-          score += 30;
+        // Fill rate scoring (excluding booleans and system fields)
+        const isBooleanType = attr.AttributeTypeName?.Value === "BooleanType";
+        const isSystemField = systemFields.has(logicalName);
+
+        if (!isBooleanType && !isSystemField) {
+          const nonNullCount = records.filter(
+            (r: any) =>
+              r[attr.LogicalName] != null && r[attr.LogicalName] !== "",
+          ).length;
+          const fillRate = nonNullCount / records.length;
+
+          if (fillRate > 0.5) {
+            score += fillRate * 30;
+            reasons.push(`${Math.round(fillRate * 100)}% populated`);
+          }
+        }
+
+        // Common names with publisher prefix support
+        const fieldName = logicalName.toLowerCase();
+        const hasCommonName =
+          fieldName.endsWith("_name") ||
+          fieldName === "name" ||
+          fieldName.includes("title") ||
+          fieldName.includes("subject") ||
+          fieldName.includes("email") ||
+          fieldName.includes("phone") ||
+          fieldName.includes("status") ||
+          fieldName.includes("state");
+
+        if (hasCommonName) {
+          score += 50;
           reasons.push("common field");
         }
 
@@ -366,6 +457,10 @@ export class MetadataService {
         .sort((a, b) => b.score - a.score)
         .slice(0, 15);
 
+      logger.debug(
+        `Top 15 important fields for ${logicalName}: ${sortedFields.map((f) => `${f.logicalName}(${f.score})`).join(", ")}`,
+      );
+
       return sortedFields.map((f) => f.logicalName);
     } catch (error) {
       logger.warn("Error sampling records, falling back to metadata:", error);
@@ -375,6 +470,7 @@ export class MetadataService {
 
   private getImportantFieldsFromMetadata(
     attributes: AttributeMetadata[],
+    viewFields?: Set<string>,
   ): string[] {
     const important = attributes
       .filter((attr) => {
@@ -383,6 +479,19 @@ export class MetadataService {
         const isLogical = attr.IsLogical === true;
         const isReadOnlyComputed =
           attr.IsValidForCreate === false && attr.IsValidForUpdate === false;
+
+        const fieldName = attr.LogicalName.toLowerCase();
+        const hasCommonName =
+          fieldName.endsWith("_name") ||
+          fieldName === "name" ||
+          fieldName.includes("title") ||
+          fieldName.includes("subject") ||
+          fieldName.includes("email") ||
+          fieldName.includes("phone") ||
+          fieldName.includes("status") ||
+          fieldName.includes("state");
+
+        const inView = viewFields ? viewFields.has(attr.LogicalName) : false;
 
         return (
           attr.IsValidForRead &&
@@ -394,15 +503,66 @@ export class MetadataService {
             attr.IsPrimaryName ||
             attr.RequiredLevel?.Value === "ApplicationRequired" ||
             attr.RequiredLevel?.Value === "SystemRequired" ||
-            attr.LogicalName.includes("name") ||
-            attr.LogicalName.includes("email") ||
-            attr.LogicalName === "statecode" ||
-            attr.LogicalName === "statuscode")
+            inView ||
+            hasCommonName)
         );
       })
       .slice(0, 15);
 
     return important.map((a) => a.LogicalName);
+  }
+
+  /**
+   * Get fields that appear in system views for an entity.
+   * This helps identify important fields that users typically see and work with.
+   */
+  private async getFieldsFromViews(
+    logicalName: string,
+    service: DataverseWebApiService,
+    accessToken: string,
+  ): Promise<Set<string>> {
+    try {
+      // Query system views (savedquery) for this entity
+      // We look at the layoutxml to find which fields are displayed in views
+      const response = await service.sendRequestString(
+        accessToken,
+        "GET",
+        `savedqueries?$select=layoutxml&$filter=returnedtypecode eq '${logicalName}' and querytype eq 0&$top=10`,
+      );
+
+      const data = JSON.parse(response);
+      const views = data.value || [];
+      const fieldSet = new Set<string>();
+
+      for (const view of views) {
+        if (!view.layoutxml) continue;
+
+        // Parse the layoutxml to extract field names
+        // layoutxml contains <cell> elements with 'name' attributes
+        const cellNameMatches = view.layoutxml.matchAll(
+          /<cell[^>]+name="([^"]+)"/gi,
+        );
+
+        for (const match of cellNameMatches) {
+          const fieldName = match[1];
+          if (fieldName && !fieldName.startsWith("_")) {
+            fieldSet.add(fieldName);
+          }
+        }
+      }
+
+      logger.debug(
+        `Found ${fieldSet.size} fields from ${views.length} views for ${logicalName}: ${Array.from(fieldSet).join(", ")}`,
+      );
+
+      return fieldSet;
+    } catch (error) {
+      logger.warn(
+        `Could not fetch view fields for ${logicalName}, continuing without view data:`,
+        error,
+      );
+      return new Set<string>();
+    }
   }
 
   private isVirtualAnnotationProperty(
@@ -472,22 +632,34 @@ export class MetadataService {
 
     const exampleValue = this.generateSyntheticValue(attr);
 
-    return {
+    const flags: string[] = [];
+    if (attr.IsPrimaryId) flags.push("PrimaryId");
+    if (attr.IsPrimaryName) flags.push("PrimaryName");
+    if (
+      attr.RequiredLevel?.Value === "ApplicationRequired" ||
+      attr.RequiredLevel?.Value === "SystemRequired"
+    ) {
+      flags.push("Required");
+    }
+    if (!attr.IsValidForCreate && !attr.IsValidForUpdate) {
+      flags.push("ReadOnly");
+    }
+
+    const result: AttributeDescription = {
       logicalName: attr.LogicalName,
       displayName,
       description,
       type,
-      isPrimaryId: attr.IsPrimaryId || false,
-      isPrimaryName: attr.IsPrimaryName || false,
-      isRequired:
-        attr.RequiredLevel?.Value === "ApplicationRequired" ||
-        attr.RequiredLevel?.Value === "SystemRequired" ||
-        false,
-      isReadOnly: (!attr.IsValidForCreate && !attr.IsValidForUpdate) || false,
       maxLength: attr.MaxLength,
       format: attr.Format,
       exampleValue,
     };
+
+    if (flags.length > 0) {
+      result.flags = flags.join("|");
+    }
+
+    return result;
   }
 
   private generateSyntheticValue(attr: AttributeMetadata): any {
@@ -549,15 +721,13 @@ export class MetadataService {
       case "StateType":
       case "StatusType":
         if (attr.OptionSet?.Options && attr.OptionSet.Options.length > 0) {
-          const firstOption = attr.OptionSet.Options[0];
-          return {
-            value: firstOption.Value,
+          return attr.OptionSet.Options.map((opt) => ({
+            value: opt.Value,
             label:
-              firstOption.Label?.UserLocalizedLabel?.Label ||
-              `Option ${firstOption.Value}`,
-          };
+              opt.Label?.UserLocalizedLabel?.Label || `Option ${opt.Value}`,
+          }));
         }
-        return { value: 1, label: "Sample Option" };
+        return [{ value: 1, label: "Sample Option" }];
 
       case "LookupType":
       case "CustomerType":
@@ -571,6 +741,9 @@ export class MetadataService {
 
       case "UniqueidentifierType":
         return "00000000-0000-0000-0000-000000000000";
+
+      case "EntityNameType":
+        return "account";
 
       default:
         return null;
@@ -937,7 +1110,11 @@ export class MetadataService {
 
     // Get required attributes (excluding primary ID which is auto-generated)
     const requiredAttributes = attributeFormatDescriptions
-      .filter((attr) => attr.isRequired && !attr.isPrimaryId)
+      .filter(
+        (attr) =>
+          attr.flags?.includes("Required") &&
+          !attr.flags?.includes("PrimaryId"),
+      )
       .map((attr) => attr.logicalName);
 
     // Create general guidance for the table
@@ -987,7 +1164,9 @@ export class MetadataService {
 
     // Build format guidance and example values based on type
     let formatGuidance = "";
-    const exampleValues: string[] = [];
+    const exampleValues: Array<
+      string | number | boolean | { value: number | string; label: string }
+    > = [];
     let optionSet: AttributeFormatDescription["optionSet"];
     let booleanOptions: AttributeFormatDescription["booleanOptions"];
     let lookupTargets: AttributeFormatDescription["lookupTargets"];
@@ -1027,7 +1206,7 @@ export class MetadataService {
               }`
             : ""
         }.`;
-        exampleValues.push("42", "100");
+        exampleValues.push(42, 100);
         break;
 
       case "DecimalType":
@@ -1043,7 +1222,7 @@ export class MetadataService {
               }`
             : ""
         }.`;
-        exampleValues.push("123.45", "99.99");
+        exampleValues.push(123.45, 99.99);
         break;
 
       case "MoneyType":
@@ -1058,7 +1237,7 @@ export class MetadataService {
               }`
             : ""
         }.`;
-        exampleValues.push("1234.56", "99.99");
+        exampleValues.push(1234.56, 99.99);
         break;
 
       case "BooleanType":
@@ -1079,11 +1258,11 @@ export class MetadataService {
           };
 
           formatGuidance = `Boolean value. Accepted values: true, false, 1, 0, "${booleanOptions.trueOption.label}", or "${booleanOptions.falseOption.label}".`;
-          exampleValues.push("true", "false", "1", "0");
+          exampleValues.push(true, false, 1, 0);
         } else {
           formatGuidance =
             "Boolean value. Accepted values: true, false, 1, or 0.";
-          exampleValues.push("true", "false");
+          exampleValues.push(true, false);
         }
         break;
 
@@ -1120,9 +1299,12 @@ export class MetadataService {
             .join(", ")}) or label name (${options
             .map((o) => `"${o.label}"`)
             .join(", ")}). Use integer values for best reliability.`;
+          // For picklists, return value/label pairs from the option set
           exampleValues.push(
-            options[0].value.toString(),
-            `"${options[0].label}"`,
+            ...options.slice(0, 3).map((o) => ({
+              value: o.value,
+              label: o.label,
+            })),
           );
         } else {
           formatGuidance =
@@ -1240,6 +1422,14 @@ export class MetadataService {
         exampleValues.push('"12345678-1234-1234-1234-123456789abc"');
         break;
 
+      case "EntityNameType":
+        formatGuidance =
+          "Entity logical name. Accepts the logical name of a Dataverse entity (e.g., 'account', 'contact', 'systemuser'). " +
+          "This field stores a reference to an entity type, commonly used for polymorphic relationships or to indicate " +
+          "what type of entity a record relates to.";
+        exampleValues.push('"account"', '"contact"', '"systemuser"');
+        break;
+
       case "ImageType":
         formatGuidance = "Image data as base64-encoded string.";
         exampleValues.push('"data:image/png;base64,iVBORw0KGgoAAAANSUhEUg..."');
@@ -1256,20 +1446,26 @@ export class MetadataService {
         exampleValues.push("null");
     }
 
-    return {
+    const flags: string[] = [];
+    if (attr.IsPrimaryId) flags.push("PrimaryId");
+    if (attr.IsPrimaryName) flags.push("PrimaryName");
+    if (
+      attr.RequiredLevel?.Value === "ApplicationRequired" ||
+      attr.RequiredLevel?.Value === "SystemRequired"
+    ) {
+      flags.push("Required");
+    }
+    if (!attr.IsValidForCreate && !attr.IsValidForUpdate) {
+      flags.push("ReadOnly");
+    }
+    if (attr.IsValidForCreate) flags.push("ValidForCreate");
+    if (attr.IsValidForUpdate) flags.push("ValidForUpdate");
+
+    const result: AttributeFormatDescription = {
       logicalName: attr.LogicalName,
       displayName,
       description,
       type,
-      isPrimaryId: attr.IsPrimaryId || false,
-      isPrimaryName: attr.IsPrimaryName || false,
-      isRequired:
-        attr.RequiredLevel?.Value === "ApplicationRequired" ||
-        attr.RequiredLevel?.Value === "SystemRequired" ||
-        false,
-      isReadOnly: !attr.IsValidForCreate && !attr.IsValidForUpdate,
-      isValidForCreate: attr.IsValidForCreate || false,
-      isValidForUpdate: attr.IsValidForUpdate || false,
       maxLength: attr.MaxLength,
       minValue: attr.MinValue,
       maxValue: attr.MaxValue,
@@ -1281,6 +1477,12 @@ export class MetadataService {
       formatGuidance,
       exampleValues,
     };
+
+    if (flags.length > 0) {
+      result.flags = flags.join("|");
+    }
+
+    return result;
   }
 
   /**

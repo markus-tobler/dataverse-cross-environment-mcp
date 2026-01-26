@@ -55,15 +55,11 @@ describe("Retrieve Record Tool Integration", () => {
     } as any;
     const result = await handler(params);
 
-    expect(mockDataverseClient.resolveLogicalName).toHaveBeenCalledWith(
-      "account",
-      undefined
-    );
     expect(mockDataverseClient.retrieveRecord).toHaveBeenCalledWith(
       "account",
       "guid-1",
       undefined,
-      false
+      false,
     );
     expect(result.content).toEqual(
       expect.arrayContaining([
@@ -75,7 +71,7 @@ describe("Retrieve Record Tool Integration", () => {
           type: "resource_link",
           uri: "dataverse:///account/guid-1",
         }),
-      ])
+      ]),
     );
   });
 });

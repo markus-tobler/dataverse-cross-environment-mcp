@@ -357,7 +357,7 @@ export function registerDataverseTools(
     "search",
     {
       description:
-        "Search for records using keyword searches across Dataverse tables. Best for finding records by text content. Don't use for filtering or listing records. For filter, use 'run_predefined_query' or 'run_custom_query'. Returns a list of matching records with their record_id (primary GUID), primary name, and important attributes. NOTE: For listing or retrieving multiple records, check 'get_predefined_queries' first to see if a suitable view exists - predefined queries are more efficient for structured data retrieval. Use 'run_custom_query' for filtered searches with specific criteria. To discover available tables, use the 'list_tables' tool first.",
+        "Search for records using keyword searches across Dataverse tables. Best for finding records by text content. Don't use for filtering or listing records. For filter, use 'run_predefined_query' or 'run_custom_query'. Returns a list of matching records with their record_id (primary GUID), primary name, deep link, and enriched attributes. The top 15 ranked results are automatically enriched with complete record data including all important attributes with formatted values for better context. NOTE: For listing or retrieving multiple records, check 'get_predefined_queries' first to see if a suitable view exists - predefined queries are more efficient for structured data retrieval. Use 'run_custom_query' for filtered searches with specific criteria. To discover available tables, use the 'list_tables' tool first.",
       inputSchema: {
         searchTerm: z
           .string()
@@ -404,6 +404,60 @@ export function registerDataverseTools(
             req,
           );
 
+          // Enrich top 10 results with full record data
+          const topResults = searchResponse.results.slice(0, 15);
+          const remainingResults = searchResponse.results.slice(15);
+
+          logger.debug(
+            `Enriching top ${topResults.length} search results with full record data`,
+          );
+
+          const enrichedResults = await Promise.all(
+            topResults.map(async (r) => {
+              try {
+                const fullRecord = await dataverseClient.retrieveRecord(
+                  r.tableName,
+                  r.recordId,
+                  req,
+                  false, // Only important columns
+                );
+                return {
+                  table_name: r.tableName,
+                  record_id: r.recordId,
+                  primary_name: r.primaryName,
+                  deep_link: r.deepLink,
+                  attributes: fullRecord,
+                  enriched: true,
+                };
+              } catch (error: any) {
+                logger.warn(
+                  `Failed to enrich record ${r.recordId} from ${r.tableName}: ${error.message}. Using search result attributes.`,
+                );
+                // Graceful degradation: fallback to search result attributes
+                return {
+                  table_name: r.tableName,
+                  record_id: r.recordId,
+                  primary_name: r.primaryName,
+                  deep_link: r.deepLink,
+                  attributes: r.attributes,
+                  enriched: false,
+                };
+              }
+            }),
+          );
+
+          // Map remaining results without enrichment
+          const unenrichedResults = remainingResults.map((r) => ({
+            table_name: r.tableName,
+            record_id: r.recordId,
+            primary_name: r.primaryName,
+            deep_link: r.deepLink,
+            attributes: r.attributes,
+            enriched: false,
+          }));
+
+          const allResults = [...enrichedResults, ...unenrichedResults];
+
           const content: any[] = [
             {
               type: "text",
@@ -412,33 +466,15 @@ export function registerDataverseTools(
                   search_term: params.searchTerm,
                   table_filter: params.tableFilter,
                   total_record_count: searchResponse.totalRecordCount,
-                  results: searchResponse.results.map((r) => ({
-                    table_name: r.tableName,
-                    record_id: r.recordId,
-                    primary_name: r.primaryName,
-                    deep_link: r.deepLink,
-                    attributes: r.attributes,
-                  })),
+                  enriched_count: enrichedResults.filter((r) => r.enriched)
+                    .length,
+                  results: allResults,
                 },
                 null,
                 2,
               ),
             },
           ];
-
-          searchResponse.results.forEach((r) => {
-            content.push({
-              type: "resource_link",
-              uri: `dataverse:///${r.tableName}/${r.recordId}`,
-              name: r.primaryName || r.recordId,
-              description: `${r.tableName} record`,
-              mimeType: "application/json",
-              annotations: {
-                audience: ["assistant"],
-                priority: 0.8,
-              },
-            });
-          });
 
           return { content };
         },
@@ -671,10 +707,7 @@ export function registerDataverseTools(
                     display_name: attr.displayName,
                     description: attr.description,
                     type: attr.type,
-                    is_primary_id: attr.isPrimaryId,
-                    is_primary_name: attr.isPrimaryName,
-                    is_required: attr.isRequired,
-                    is_read_only: attr.isReadOnly,
+                    flags: attr.flags,
                     max_length: attr.maxLength,
                     format: attr.format,
                     example_value: attr.exampleValue,
@@ -779,12 +812,7 @@ export function registerDataverseTools(
                     display_name: attr.displayName,
                     description: attr.description,
                     type: attr.type,
-                    is_primary_id: attr.isPrimaryId,
-                    is_primary_name: attr.isPrimaryName,
-                    is_required: attr.isRequired,
-                    is_read_only: attr.isReadOnly,
-                    is_valid_for_create: attr.isValidForCreate,
-                    is_valid_for_update: attr.isValidForUpdate,
+                    flags: attr.flags,
                     max_length: attr.maxLength,
                     min_value: attr.minValue,
                     max_value: attr.maxValue,

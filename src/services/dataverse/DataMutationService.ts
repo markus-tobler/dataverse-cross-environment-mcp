@@ -119,8 +119,8 @@ export class DataMutationService {
 
     const requiredFields = tableDescription.attributes.filter(
       (attr) =>
-        attr.isRequired &&
-        !attr.isReadOnly &&
+        attr.flags?.includes("Required") &&
+        !attr.flags?.includes("ReadOnly") &&
         attr.logicalName !== tableDescription.primaryIdAttribute,
     );
 
@@ -133,8 +133,8 @@ export class DataMutationService {
     for (const attribute of tableDescription.attributes) {
       // Check if the attribute is required for create operations
       if (
-        attribute.isRequired &&
-        !attribute.isReadOnly &&
+        attribute.flags?.includes("Required") &&
+        !attribute.flags?.includes("ReadOnly") &&
         attribute.logicalName !== tableDescription.primaryIdAttribute
       ) {
         // Skip system-managed fields that Dataverse handles automatically

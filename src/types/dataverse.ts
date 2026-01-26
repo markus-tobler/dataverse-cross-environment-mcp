@@ -119,10 +119,7 @@ export interface AttributeDescription {
   displayName: string;
   description?: string;
   type: string;
-  isPrimaryId: boolean;
-  isPrimaryName: boolean;
-  isRequired: boolean;
-  isReadOnly: boolean;
+  flags?: string;
   maxLength?: number;
   format?: string;
   exampleValue: any;
@@ -141,12 +138,7 @@ export interface AttributeFormatDescription {
   displayName: string;
   description?: string;
   type: string;
-  isPrimaryId: boolean;
-  isPrimaryName: boolean;
-  isRequired: boolean;
-  isReadOnly: boolean;
-  isValidForCreate: boolean;
-  isValidForUpdate: boolean;
+  flags?: string;
   maxLength?: number;
   minValue?: number;
   maxValue?: number;
@@ -176,7 +168,9 @@ export interface AttributeFormatDescription {
   }>;
   // Guidance for LLM agents
   formatGuidance: string;
-  exampleValues: string[];
+  exampleValues: Array<
+    string | number | boolean | { value: number | string; label: string }
+  >;
 }
 
 /**
