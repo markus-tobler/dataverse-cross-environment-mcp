@@ -79,6 +79,14 @@ describe("Tool Registration Integration Tests", () => {
     };
     mockDataverseClient.search.mockResolvedValue(searchResponse);
 
+    // Mock retrieveRecord for enrichment
+    mockDataverseClient.retrieveRecord.mockResolvedValue({
+      accountid: "account-id-1",
+      name: "Test Account",
+      revenue: 100000,
+      "revenue@OData.Community.Display.V1.FormattedValue": "$100,000.00",
+    });
+
     const call = server.tool.mock.calls.find((c) => c[0] === "search");
     expect(call).toBeDefined();
     const handler = call![2];
@@ -90,6 +98,15 @@ describe("Tool Registration Integration Tests", () => {
       undefined,
       undefined,
     );
+
+    // Verify retrieveRecord was called to enrich the result
+    expect(mockDataverseClient.retrieveRecord).toHaveBeenCalledWith(
+      "account",
+      "account-id-1",
+      undefined,
+      false,
+    );
+
     expect(result.content).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -98,5 +115,9 @@ describe("Tool Registration Integration Tests", () => {
         }),
       ]),
     );
+
+    // Verify enriched_count is present in the response
+    expect(result.content[0].text).toContain('"enriched_count": 1');
+    expect(result.content[0].text).toContain('"enriched": true');
   });
 });
