@@ -4,6 +4,17 @@ import { logger } from "../../utils/logger.js";
 import { Request } from "express";
 import { DataverseClient } from "../../services/dataverse/DataverseClient.js";
 import { appInsightsService } from "../../services/telemetry/ApplicationInsightsService.js";
+import {
+  OutputFormat,
+  formatOutput,
+  paginateResults,
+  decodeCursor,
+  getFormatDescription,
+  getPageSizeDescription,
+  getCursorDescription,
+  flattenRecords,
+  flattenAttributesForToon,
+} from "../../utils/toonFormatter.js";
 
 export interface RequestContextProvider {
   getContext(): Request | undefined;
@@ -320,20 +331,27 @@ export function registerDataverseTools(
     {
       description:
         "List all available Dataverse tables (entities) with their display names and logical names. This tool provides metadata about tables that can be queried and searched in Dataverse. Use this tool to discover what data is available before performing searches or retrievals.",
+      inputSchema: {
+        format: z
+          .enum(["json", "toon"])
+          .optional()
+          .describe(getFormatDescription()),
+      },
     },
-    async (_params: any) => {
+    async (params: { format?: OutputFormat }) => {
       const userInfo = contextProvider.getUserInfo();
       logger.info(`Executing ListTables tool for user ${userInfo}`);
 
       return trackToolExecution("list_tables", userInfo, async () => {
         const req = contextProvider.getContext();
         const tables = await dataverseClient.listTables(req);
+        const format = params.format || "toon";
 
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(
+              text: formatOutput(
                 {
                   tables: tables.map((t) => ({
                     logical_name: t.logicalName,
@@ -342,9 +360,9 @@ export function registerDataverseTools(
                     description: t.description,
                   })),
                   count: tables.length,
+                  format,
                 },
-                null,
-                2,
+                format,
               ),
             },
           ],
@@ -357,7 +375,7 @@ export function registerDataverseTools(
     "search",
     {
       description:
-        "Search for records using keyword searches across Dataverse tables. Best for finding records by text content. Don't use for filtering or listing records. For filter, use 'run_predefined_query' or 'run_custom_query'. Returns a list of matching records with their record_id (primary GUID), primary name, deep link, and enriched attributes. The top 15 ranked results are automatically enriched with complete record data including all important attributes with formatted values for better context. NOTE: For listing or retrieving multiple records, check 'get_predefined_queries' first to see if a suitable view exists - predefined queries are more efficient for structured data retrieval. Use 'run_custom_query' for filtered searches with specific criteria. To discover available tables, use the 'list_tables' tool first.",
+        "Search for records using keyword searches across Dataverse tables. Best for finding records by text content. Don't use for filtering or listing records. For filter, use 'run_predefined_query' or 'run_custom_query'. Returns a list of matching records with their record_id (primary GUID), primary name, deep link, and enriched attributes. The top 15 ranked results are automatically enriched with complete record data. Supports pagination via 'pageSize' and 'cursor' parameters. Use 'toon' format to reduce token usage by 30-60%. NOTE: For listing or retrieving multiple records, check 'get_predefined_queries' first - predefined queries are more efficient. To discover available tables, use the 'list_tables' tool first.",
       inputSchema: {
         searchTerm: z
           .string()
@@ -366,20 +384,22 @@ export function registerDataverseTools(
           .union([z.string(), z.array(z.string())])
           .optional()
           .describe(
-            "Optional: Table name(s) to search within - can be logical name (e.g., 'salesorder') or entity set name (e.g., 'salesorders'). Accepts a single table name or an array like ['account', 'contact']. If not provided, searches across all enabled tables. When specified, returns only important columns for better performance.",
+            "Optional: Table name(s) to search within - can be logical name (e.g., 'salesorder') or entity set name (e.g., 'salesorders'). Accepts a single table name or an array like ['account', 'contact']. If not provided, searches across all enabled tables.",
           ),
-        top: z
-          .number()
+        pageSize: z.number().optional().describe(getPageSizeDescription(50)),
+        cursor: z.string().optional().describe(getCursorDescription()),
+        format: z
+          .enum(["json", "toon"])
           .optional()
-          .describe(
-            "Optional: Maximum number of results to return (default: 100)",
-          ),
+          .describe(getFormatDescription()),
       },
     },
     async (params: {
       searchTerm: string;
       tableFilter?: string | string[];
-      top?: number;
+      pageSize?: number;
+      cursor?: string;
+      format?: OutputFormat;
     }) => {
       const userInfo = contextProvider.getUserInfo();
       const filterDisplay = params.tableFilter
@@ -397,57 +417,21 @@ export function registerDataverseTools(
         userInfo,
         async () => {
           const req = contextProvider.getContext();
+          const format = params.format || "toon";
+          const pageSize = params.pageSize || 50;
+
+          // Calculate how many results to fetch from Dataverse
+          // We fetch more than one page to support pagination
+          const fetchSize = 500; // Max results from Dataverse search API
           const searchResponse = await dataverseClient.search(
             params.searchTerm,
-            params.top ?? 100,
+            fetchSize,
             params.tableFilter,
             req,
           );
 
-          // Enrich top 10 results with full record data
-          const topResults = searchResponse.results.slice(0, 15);
-          const remainingResults = searchResponse.results.slice(15);
-
-          logger.debug(
-            `Enriching top ${topResults.length} search results with full record data`,
-          );
-
-          const enrichedResults = await Promise.all(
-            topResults.map(async (r) => {
-              try {
-                const fullRecord = await dataverseClient.retrieveRecord(
-                  r.tableName,
-                  r.recordId,
-                  req,
-                  false, // Only important columns
-                );
-                return {
-                  table_name: r.tableName,
-                  record_id: r.recordId,
-                  primary_name: r.primaryName,
-                  deep_link: r.deepLink,
-                  attributes: fullRecord,
-                  enriched: true,
-                };
-              } catch (error: any) {
-                logger.warn(
-                  `Failed to enrich record ${r.recordId} from ${r.tableName}: ${error.message}. Using search result attributes.`,
-                );
-                // Graceful degradation: fallback to search result attributes
-                return {
-                  table_name: r.tableName,
-                  record_id: r.recordId,
-                  primary_name: r.primaryName,
-                  deep_link: r.deepLink,
-                  attributes: r.attributes,
-                  enriched: false,
-                };
-              }
-            }),
-          );
-
-          // Map remaining results without enrichment
-          const unenrichedResults = remainingResults.map((r) => ({
+          // Map all results first
+          const allMappedResults = searchResponse.results.map((r) => ({
             table_name: r.tableName,
             record_id: r.recordId,
             primary_name: r.primaryName,
@@ -456,27 +440,113 @@ export function registerDataverseTools(
             enriched: false,
           }));
 
-          const allResults = [...enrichedResults, ...unenrichedResults];
+          // Apply pagination
+          const { items: paginatedResults, pagination } = paginateResults(
+            allMappedResults,
+            pageSize,
+            params.cursor,
+            { table: "search" },
+          );
 
-          const content: any[] = [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  search_term: params.searchTerm,
-                  table_filter: params.tableFilter,
-                  total_record_count: searchResponse.totalRecordCount,
-                  enriched_count: enrichedResults.filter((r) => r.enriched)
-                    .length,
-                  results: allResults,
-                },
-                null,
-                2,
-              ),
-            },
-          ];
+          // Enrich top results on first page (up to 15)
+          const enrichCount = params.cursor
+            ? 0
+            : Math.min(15, paginatedResults.length);
 
-          return { content };
+          if (enrichCount > 0) {
+            logger.debug(
+              `Enriching top ${enrichCount} search results with full record data`,
+            );
+
+            for (let i = 0; i < enrichCount; i++) {
+              try {
+                const r = paginatedResults[i];
+                const fullRecord = await dataverseClient.retrieveRecord(
+                  r.table_name,
+                  r.record_id,
+                  req,
+                  false,
+                );
+                paginatedResults[i] = {
+                  ...r,
+                  attributes: fullRecord,
+                  enriched: true,
+                };
+              } catch (error: any) {
+                logger.warn(
+                  `Failed to enrich record: ${error.message}. Using search result attributes.`,
+                );
+              }
+            }
+          }
+
+          // Flatten results for TOON format optimization (merges attributes to top level)
+          const formattedResults =
+            format !== "json"
+              ? flattenRecords(
+                  paginatedResults.map((r) => ({
+                    record_id: r.record_id,
+                    deep_link: r.deep_link,
+                    attributes: {
+                      table_name: r.table_name,
+                      primary_name: r.primary_name,
+                      enriched: r.enriched,
+                      ...r.attributes,
+                    },
+                  })),
+                )
+              : paginatedResults;
+
+          // Prepare response based on format
+          if (format === "json") {
+            // JSON format: standard nested structure
+            const content: any[] = [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    search_term: params.searchTerm,
+                    table_filter: params.tableFilter,
+                    total_record_count: searchResponse.totalRecordCount,
+                    enriched_count: paginatedResults.filter((r) => r.enriched)
+                      .length,
+                    pagination: {
+                      page_size: pagination.pageSize,
+                      returned_count: pagination.returnedCount,
+                      has_more: pagination.hasMore,
+                      next_cursor: pagination.nextCursor,
+                    },
+                    results: paginatedResults,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ];
+
+            return { content };
+          }
+
+          // TOON format (default): encode entire response as TOON
+          const responseData = {
+            search_term: params.searchTerm,
+            table_filter: params.tableFilter,
+            total_record_count: searchResponse.totalRecordCount,
+            enriched_count: paginatedResults.filter((r) => r.enriched).length,
+            page_size: pagination.pageSize,
+            returned_count: pagination.returnedCount,
+            has_more: pagination.hasMore,
+            next_cursor: pagination.nextCursor,
+            results: formattedResults,
+          };
+          return {
+            content: [
+              {
+                type: "text",
+                text: formatOutput(responseData, "toon"),
+              },
+            ],
+          };
         },
         { searchTerm: params.searchTerm, tableFilter: filterDisplay },
       );
@@ -671,13 +741,22 @@ export function registerDataverseTools(
           .describe(
             "If true, return all attributes; if false, return only important fields based on recent data analysis (default: false)",
           ),
+        format: z
+          .enum(["json", "toon"])
+          .optional()
+          .describe(getFormatDescription()),
       },
     },
-    async (params: { tableName: string; full?: boolean }) => {
+    async (params: {
+      tableName: string;
+      full?: boolean;
+      format?: "json" | "toon";
+    }) => {
       const userInfo = contextProvider.getUserInfo();
       logger.info(`[Tool] describe_table invoked by ${userInfo}`, {
         tableName: params.tableName,
         full: params.full || false,
+        format: params.format || "toon",
       });
 
       try {
@@ -689,36 +768,64 @@ export function registerDataverseTools(
           req,
         );
 
+        // Format attributes array
+        const attributes = description.attributes.map((attr) => ({
+          logical_name: attr.logicalName,
+          display_name: attr.displayName,
+          description: attr.description,
+          type: attr.type,
+          flags: attr.flags,
+          max_length: attr.maxLength,
+          format: attr.format,
+          example_value: attr.exampleValue,
+        }));
+
+        // Prepare response based on format
+        if (params.format === "json") {
+          // JSON format: standard nested structure
+          const responseData = {
+            table: {
+              logical_name: description.logicalName,
+              display_name: description.displayName,
+              description: description.description,
+              primary_id_attribute: description.primaryIdAttribute,
+              primary_name_attribute: description.primaryNameAttribute,
+            },
+            attributes: attributes,
+            sample_record: description.sampleRecord,
+            attribute_count: description.attributes.length,
+            mode: params.full ? "full" : "important fields only",
+          };
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(responseData, null, 2),
+              },
+            ],
+          };
+        }
+
+        // TOON format (default): flatten attributes and encode entire response as TOON
+        const responseData = {
+          table_logical_name: description.logicalName,
+          table_display_name: description.displayName,
+          table_description: description.description,
+          primary_id_attribute: description.primaryIdAttribute,
+          primary_name_attribute: description.primaryNameAttribute,
+          attribute_count: description.attributes.length,
+          mode: params.full ? "full" : "important fields only",
+          sample_record: description.sampleRecord
+            ? JSON.stringify(description.sampleRecord)
+            : null,
+          attributes: flattenAttributesForToon(attributes),
+        };
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(
-                {
-                  table: {
-                    logical_name: description.logicalName,
-                    display_name: description.displayName,
-                    description: description.description,
-                    primary_id_attribute: description.primaryIdAttribute,
-                    primary_name_attribute: description.primaryNameAttribute,
-                  },
-                  attributes: description.attributes.map((attr) => ({
-                    logical_name: attr.logicalName,
-                    display_name: attr.displayName,
-                    description: attr.description,
-                    type: attr.type,
-                    flags: attr.flags,
-                    max_length: attr.maxLength,
-                    format: attr.format,
-                    example_value: attr.exampleValue,
-                  })),
-                  sample_record: description.sampleRecord,
-                  attribute_count: description.attributes.length,
-                  mode: params.full ? "full" : "important fields only",
-                },
-                null,
-                2,
-              ),
+              text: formatOutput(responseData, "toon"),
             },
           ],
         };
@@ -775,12 +882,17 @@ export function registerDataverseTools(
           .describe(
             "The logical name or entity set name of the table (e.g., 'account', 'contact', 'accounts')",
           ),
+        format: z
+          .enum(["json", "toon"])
+          .optional()
+          .describe(getFormatDescription()),
       },
     },
-    async (params: { tableName: string }) => {
+    async (params: { tableName: string; format?: "json" | "toon" }) => {
       const userInfo = contextProvider.getUserInfo();
       logger.info(`[Tool] describe_table_format invoked by ${userInfo}`, {
         tableName: params.tableName,
+        format: params.format || "toon",
       });
 
       try {
@@ -791,44 +903,71 @@ export function registerDataverseTools(
           req,
         );
 
+        // Format attributes array
+        const attributes = formatDescription.attributes.map((attr) => ({
+          logical_name: attr.logicalName,
+          display_name: attr.displayName,
+          description: attr.description,
+          type: attr.type,
+          flags: attr.flags,
+          max_length: attr.maxLength,
+          min_value: attr.minValue,
+          max_value: attr.maxValue,
+          precision: attr.precision,
+          format: attr.format,
+          option_set: attr.optionSet,
+          boolean_options: attr.booleanOptions,
+          lookup_targets: attr.lookupTargets,
+          format_guidance: attr.formatGuidance,
+          example_values: attr.exampleValues,
+        }));
+
+        // Prepare response based on format
+        if (params.format === "json") {
+          // JSON format: standard nested structure
+          const responseData = {
+            table: {
+              logical_name: formatDescription.logicalName,
+              display_name: formatDescription.displayName,
+              description: formatDescription.description,
+              primary_id_attribute: formatDescription.primaryIdAttribute,
+              primary_name_attribute: formatDescription.primaryNameAttribute,
+            },
+            required_attributes: formatDescription.requiredAttributes,
+            creation_guidance: formatDescription.creationGuidance,
+            attributes: attributes,
+            attribute_count: formatDescription.attributes.length,
+          };
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(responseData, null, 2),
+              },
+            ],
+          };
+        }
+
+        // TOON format (default): flatten attributes and encode entire response as TOON
+        const responseData = {
+          table_logical_name: formatDescription.logicalName,
+          table_display_name: formatDescription.displayName,
+          table_description: formatDescription.description,
+          primary_id_attribute: formatDescription.primaryIdAttribute,
+          primary_name_attribute: formatDescription.primaryNameAttribute,
+          required_attributes: JSON.stringify(
+            formatDescription.requiredAttributes,
+          ),
+          creation_guidance: formatDescription.creationGuidance,
+          attribute_count: formatDescription.attributes.length,
+          attributes: flattenAttributesForToon(attributes),
+        };
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(
-                {
-                  table: {
-                    logical_name: formatDescription.logicalName,
-                    display_name: formatDescription.displayName,
-                    description: formatDescription.description,
-                    primary_id_attribute: formatDescription.primaryIdAttribute,
-                    primary_name_attribute:
-                      formatDescription.primaryNameAttribute,
-                  },
-                  required_attributes: formatDescription.requiredAttributes,
-                  creation_guidance: formatDescription.creationGuidance,
-                  attributes: formatDescription.attributes.map((attr) => ({
-                    logical_name: attr.logicalName,
-                    display_name: attr.displayName,
-                    description: attr.description,
-                    type: attr.type,
-                    flags: attr.flags,
-                    max_length: attr.maxLength,
-                    min_value: attr.minValue,
-                    max_value: attr.maxValue,
-                    precision: attr.precision,
-                    format: attr.format,
-                    option_set: attr.optionSet,
-                    boolean_options: attr.booleanOptions,
-                    lookup_targets: attr.lookupTargets,
-                    format_guidance: attr.formatGuidance,
-                    example_values: attr.exampleValues,
-                  })),
-                  attribute_count: formatDescription.attributes.length,
-                },
-                null,
-                2,
-              ),
+              text: formatOutput(responseData, "toon"),
             },
           ],
         };
@@ -885,12 +1024,17 @@ export function registerDataverseTools(
           .describe(
             "The logical name of the table to get views for (e.g., 'account', 'contact')",
           ),
+        format: z
+          .enum(["json", "toon"])
+          .optional()
+          .describe(getFormatDescription()),
       },
     },
-    async (params: { tableName: string }) => {
+    async (params: { tableName: string; format?: "json" | "toon" }) => {
       const userInfo = contextProvider.getUserInfo();
       logger.info(`[Tool] get_predefined_queries invoked by ${userInfo}`, {
         tableName: params.tableName,
+        format: params.format || "toon",
       });
 
       try {
@@ -900,23 +1044,23 @@ export function registerDataverseTools(
           req,
         );
 
+        const queriesList = queries.map((q) => ({
+          id: q.id,
+          type: q.type,
+          name: q.name,
+        }));
+
+        const responseData = {
+          table_name: params.tableName,
+          queries: formatOutput(queriesList, params.format || "toon"),
+          count: queries.length,
+        };
+
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(
-                {
-                  table_name: params.tableName,
-                  queries: queries.map((q) => ({
-                    id: q.id,
-                    type: q.type,
-                    name: q.name,
-                  })),
-                  count: queries.length,
-                },
-                null,
-                2,
-              ),
+              text: JSON.stringify(responseData, null, 2),
             },
           ],
         };
@@ -979,13 +1123,28 @@ export function registerDataverseTools(
           .describe(
             "Optional: The logical name of the table (required only when querying by name instead of ID)",
           ),
+        pageSize: z.number().optional().describe(getPageSizeDescription(50)),
+        cursor: z.string().optional().describe(getCursorDescription()),
+        format: z
+          .enum(["json", "toon"])
+          .optional()
+          .describe(getFormatDescription()),
       },
     },
-    async (params: { queryIdOrName: string; tableName?: string }) => {
+    async (params: {
+      queryIdOrName: string;
+      tableName?: string;
+      pageSize?: number;
+      cursor?: string;
+      format?: "json" | "toon";
+    }) => {
       const userInfo = contextProvider.getUserInfo();
       logger.info(`[Tool] run_predefined_query invoked by ${userInfo}`, {
         queryIdOrName: params.queryIdOrName,
         tableName: params.tableName || "auto-detect",
+        pageSize: params.pageSize || 50,
+        cursor: params.cursor ? "provided" : "none",
+        format: params.format || "toon",
       });
 
       try {
@@ -996,24 +1155,59 @@ export function registerDataverseTools(
           req,
         );
 
+        // Transform records for output
+        const allRecords = result.records.map((r) => ({
+          record_id: r.recordId,
+          deep_link: r.deepLink,
+          attributes: r.attributes,
+        }));
+
+        // Apply pagination
+        const paginatedResult = paginateResults(
+          allRecords,
+          params.pageSize || 50,
+          params.cursor,
+          { table: result.tableName, queryId: params.queryIdOrName },
+        );
+
+        // Prepare response based on format
+        if (params.format === "json") {
+          // JSON format: standard nested structure
+          const responseData = {
+            query: params.queryIdOrName,
+            table_name: result.tableName,
+            total_record_count: result.totalRecordCount,
+            records: paginatedResult.items,
+            pagination: paginatedResult.pagination,
+          };
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(responseData, null, 2),
+              },
+            ],
+          };
+        }
+
+        // TOON format (default): flatten records and encode entire response as TOON
+        const flattenedRecords = flattenRecords(paginatedResult.items);
+        const responseData = {
+          query: params.queryIdOrName,
+          table_name: result.tableName,
+          total_record_count: result.totalRecordCount,
+          page_size: paginatedResult.pagination.pageSize,
+          returned_count: paginatedResult.pagination.returnedCount,
+          has_more: paginatedResult.pagination.hasMore,
+          next_cursor: paginatedResult.pagination.nextCursor,
+          records: flattenedRecords,
+        };
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(
-                {
-                  query: params.queryIdOrName,
-                  table_name: result.tableName,
-                  total_record_count: result.totalRecordCount,
-                  records: result.records.map((r) => ({
-                    record_id: r.recordId,
-                    deep_link: r.deepLink,
-                    attributes: r.attributes,
-                  })),
-                },
-                null,
-                2,
-              ),
+              text: formatOutput(responseData, "toon"),
             },
           ],
         };
@@ -1083,13 +1277,28 @@ export function registerDataverseTools(
           .describe(
             "Optional: The logical name of the table (if not specified in the FetchXML <entity> tag)",
           ),
+        pageSize: z.number().optional().describe(getPageSizeDescription(50)),
+        cursor: z.string().optional().describe(getCursorDescription()),
+        format: z
+          .enum(["json", "toon"])
+          .optional()
+          .describe(getFormatDescription()),
       },
     },
-    async (params: { fetchXml: string; tableName?: string }) => {
+    async (params: {
+      fetchXml: string;
+      tableName?: string;
+      pageSize?: number;
+      cursor?: string;
+      format?: "json" | "toon";
+    }) => {
       const userInfo = contextProvider.getUserInfo();
       logger.info(`[Tool] run_custom_query invoked by ${userInfo}`, {
         tableName: params.tableName || "from FetchXML",
         fetchXmlLength: params.fetchXml.length,
+        pageSize: params.pageSize || 50,
+        cursor: params.cursor ? "provided" : "none",
+        format: params.format || "toon",
       });
 
       try {
@@ -1100,23 +1309,57 @@ export function registerDataverseTools(
           req,
         );
 
+        // Transform records for output
+        const allRecords = result.records.map((r) => ({
+          record_id: r.recordId,
+          deep_link: r.deepLink,
+          attributes: r.attributes,
+        }));
+
+        // Apply pagination
+        const paginatedResult = paginateResults(
+          allRecords,
+          params.pageSize || 50,
+          params.cursor,
+          { table: result.tableName },
+        );
+
+        // Prepare response based on format
+        if (params.format === "json") {
+          // JSON format: standard nested structure
+          const responseData = {
+            table_name: result.tableName,
+            total_record_count: result.totalRecordCount,
+            records: paginatedResult.items,
+            pagination: paginatedResult.pagination,
+          };
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(responseData, null, 2),
+              },
+            ],
+          };
+        }
+
+        // TOON format (default): flatten records and encode entire response as TOON
+        const flattenedRecords = flattenRecords(paginatedResult.items);
+        const responseData = {
+          table_name: result.tableName,
+          total_record_count: result.totalRecordCount,
+          page_size: paginatedResult.pagination.pageSize,
+          returned_count: paginatedResult.pagination.returnedCount,
+          has_more: paginatedResult.pagination.hasMore,
+          next_cursor: paginatedResult.pagination.nextCursor,
+          records: flattenedRecords,
+        };
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(
-                {
-                  table_name: result.tableName,
-                  total_record_count: result.totalRecordCount,
-                  records: result.records.map((r) => ({
-                    record_id: r.recordId,
-                    deep_link: r.deepLink,
-                    attributes: r.attributes,
-                  })),
-                },
-                null,
-                2,
-              ),
+              text: formatOutput(responseData, "toon"),
             },
           ],
         };

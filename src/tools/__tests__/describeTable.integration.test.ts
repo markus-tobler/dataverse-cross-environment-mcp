@@ -61,7 +61,7 @@ describe("Describe Table Tool Integration", () => {
       sampleRecord: { name: "Contoso" },
     } as any);
 
-    const params = { tableName: "account", full: false } as any;
+    const params = { tableName: "account", full: false, format: "json" } as any;
     const result = await handler(params);
 
     expect(mockDataverseClient.describeTable).toHaveBeenCalledWith(
