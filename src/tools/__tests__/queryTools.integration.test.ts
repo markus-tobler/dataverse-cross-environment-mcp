@@ -114,6 +114,7 @@ describe("Query Tools Integration Tests", () => {
       const result = await handler({
         queryIdOrName: "query-id-123",
         tableName: "account",
+        format: "json",
       });
       expect(mockDataverseClient.runPredefinedQuery).toHaveBeenCalledWith(
         "query-id-123",
@@ -169,7 +170,11 @@ describe("Query Tools Integration Tests", () => {
 
       const fetchXml =
         '<fetch><entity name="contact"><attribute name="firstname"/></entity></fetch>';
-      const result = await handler({ fetchXml, tableName: "contact" });
+      const result = await handler({
+        fetchXml,
+        tableName: "contact",
+        format: "json",
+      });
       expect(mockDataverseClient.runCustomQuery).toHaveBeenCalledWith(
         fetchXml,
         "contact",

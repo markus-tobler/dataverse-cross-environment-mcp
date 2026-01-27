@@ -64,7 +64,11 @@ describe("Tool Registration Integration Tests", () => {
   });
 
   it("registers search tool and calls DataverseClient.search", async () => {
-    const searchParams = { searchTerm: "test search", top: 5 } as any;
+    const searchParams = {
+      searchTerm: "test search",
+      pageSize: 5,
+      format: "json",
+    } as any;
     const searchResponse = {
       totalRecordCount: 1,
       results: [
@@ -92,9 +96,10 @@ describe("Tool Registration Integration Tests", () => {
     const handler = call![2];
 
     const result = await handler(searchParams);
+    // Note: pageSize is used for output pagination, but 500 is the default for Dataverse API calls
     expect(mockDataverseClient.search).toHaveBeenCalledWith(
       "test search",
-      5,
+      500,
       undefined,
       undefined,
     );
