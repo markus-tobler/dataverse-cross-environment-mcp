@@ -5,6 +5,17 @@ A Model Context Protocol (MCP) server that provides secure access to Microsoft D
 > [!NOTE]
 > The main purpose for this MCP is to provide Dataverse Access (e.g. CRM) accross environment boundaries. Thus, users can build Agents in a Copilot Studio environment while safely accessing CRM Data in another environment.
 
+> [!IMPORTANT]
+> **This server is no longer required for cross-environment Dataverse access.**
+>
+> Microsoft Dataverse now exposes a **native MCP endpoint** (`/api/mcp`) directly on every environment URL. You can connect Copilot Studio — or any MCP client — to a Dataverse environment in a different tenant or region without deploying this server.
+>
+> The **[Native Dataverse MCP Configuration Guide](./CONFIGURE_NATIVE.md)** shows how to configure this using **cross-environment, on-behalf-of-user (OBO) authentication**: the signed-in user's identity is delegated from Copilot Studio through the custom connector to the target Dataverse environment, so all Dataverse security roles, table permissions, and row-level security are enforced as if the user were accessing Dataverse directly. No application-level permissions bypass security, and no client secret is required.
+>
+> This is the recommended approach because it preserves the user's security context across environment boundaries — the key requirement this server was originally built to address.
+>
+> This repository remains available for scenarios that require self-hosted MCP or custom tool extensions beyond what the native endpoint provides.
+
 ## Getting Started
 
 For step-by-step installation and registration instructions, see the **[Installation Guide](./INSTALLATION_GUIDE.md)**.
