@@ -70,19 +70,27 @@ Dataverse must explicitly allow the connector's App ID to authenticate via OBO.
 
 ## Step 5 — Create the Custom Connector
 
+> [!NOTE]
 > Use `https://make.preview.powerapps.com` — the **Use managed identity** option is only available in the preview portal.
+
+> [!TIP]
+> **Use environment variables for all environment-specific fields** (Host, Client ID, Tenant ID, Resource URL, Scope). This lets you deploy the connector via a managed solution and promote it across environments without editing values manually. See [Use environment variables in solution custom connectors](https://learn.microsoft.com/en-us/connectors/custom-connectors/environment-variables) for setup steps. In any connector field, reference a variable with the syntax `@environmentVariables("your_variable_name")`.
+
+> [!TIP]
+> **Deploy with managed solutions.** Create the custom connector inside a Dataverse solution and export it as a **managed solution** to promote it to test/production environments. Strip the environment variable _current values_ from the solution before export so that each target environment supplies its own values on import. See [Export solutions](https://learn.microsoft.com/en-us/powerapps/maker/data-platform/export-solutions) and [Import solutions](https://learn.microsoft.com/en-us/powerapps/maker/data-platform/import-update-export-solutions).
 
 1. More > Discover all > **Custom connectors** > New custom connector.
 2. **General** tab:
-   - Host: `<org>.crm.dynamics.com`
+   - Host: `<org>.crm.dynamics.com` (or `@environmentVariables("your_ConnectorHost")` if using environment variables)
    - Base URL: `/api/mcp`
 3. **Security** tab:
    - Authentication type: `OAuth 2.0`
    - Identity provider: `Microsoft Entra ID`
-   - Client ID: `<APP_CLIENT_ID>`
-   - Tenant ID: `<TENANT_ID>`
+   - Client ID: `<APP_CLIENT_ID>` (or `@environmentVariables("your_ClientId")`)
+   - Tenant ID: `<TENANT_ID>` (or `@environmentVariables("your_TenantId")`)
    - Secret option: **Use managed identity** (do not enter a client secret)
-   - Scope / Resource: `api://<APP_CLIENT_ID>/access_as_user`
+   - Resource URL: `https://<org>.crm.dynamics.com` — the root URL of the target Dataverse environment (or `@environmentVariables("your_ResourceUrl")`)
+   - Scope: `https://<org>.crm.dynamics.com/.default` (or `@environmentVariables("your_Scope")`)
 4. Save the connector and copy the **Redirect URI** shown in the Security tab.
 
 ---
@@ -134,4 +142,7 @@ This step replaces the client secret. Do not create a client secret.
 - [ ] App registration redirect URI matches the connector URI
 - [ ] Federated identity credential configured
 - [ ] Connector created in `make.preview.powerapps.com`, secret option = **Use managed identity**
+- [ ] Security tab: Resource URL = `https://<org>.crm.dynamics.com`, Scope = `https://<org>.crm.dynamics.com/.default`
+- [ ] Connector is part of a Dataverse solution and environment-specific fields use environment variables (`@environmentVariables("...")` syntax)
+- [ ] Solution exported as managed (environment variable current values stripped before export)
 - [ ] Connection creates and MCP tools respond successfully
