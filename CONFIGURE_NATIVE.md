@@ -40,7 +40,7 @@ Grant admin consent if required. Do **not** add `user_impersonation`.
    - Who can consent: Admins and users
    - State: Enabled
 3. Under **Authorized client applications**, add:
-   - Client ID: `7ab7862c-4c57-491e-8a45-d52a7e023983`
+   - Client ID: `fe053c5f-3692-4f14-aef2-ee34fc081cae`
    - Authorized scope: `api://<APP_CLIENT_ID>/access_as_user`
 
 ---
@@ -71,7 +71,7 @@ Dataverse must explicitly allow the connector's App ID to authenticate via OBO.
 ## Step 5 — Create the Custom Connector
 
 > [!NOTE]
-> Use `https://make.preview.powerapps.com` — the **Use managed identity** option is only available in the preview portal.
+> Use `https://make.powerautomate.com` to configure the custom connector.
 
 > [!TIP]
 > **Use environment variables for all environment-specific fields** (Host, Client ID, Tenant ID, Resource URL, Scope). This lets you deploy the connector via a managed solution and promote it across environments without editing values manually. See [Use environment variables in solution custom connectors](https://learn.microsoft.com/en-us/connectors/custom-connectors/environment-variables) for setup steps. In any connector field, reference a variable with the syntax `@environmentVariables("your_variable_name")`.
@@ -126,7 +126,7 @@ This step replaces the client secret. Do not create a client secret.
 | Auth fails on connection creation       | Redirect URI in app reg exactly matches the connector URI                           |
 | `invalid_client` / missing secret error | Reopen connector security, confirm **Use managed identity** is selected, re-save    |
 | Token exchange fails                    | Federated credential issuer/subject/audience must match connector values exactly    |
-| Consent prompt loop                     | Confirm `7ab7862c-4c57-491e-8a45-d52a7e023983` is authorized for `access_as_user`   |
+| Consent prompt loop                     | Confirm `fe053c5f-3692-4f14-aef2-ee34fc081cae` is authorized for `access_as_user`   |
 | MCP calls return 403                    | User lacks required Dataverse security roles; `mcp.tools` admin consent not granted |
 
 ---
@@ -138,10 +138,10 @@ This step replaces the client secret. Do not create a client secret.
 - [ ] App registration: single-tenant, no client secret
 - [ ] API permission: `Dynamics CRM / mcp.tools` (delegated), admin consent granted
 - [ ] Exposed scope: `api://<APP_CLIENT_ID>/access_as_user`
-- [ ] Authorized client `7ab7862c-4c57-491e-8a45-d52a7e023983` for `access_as_user`
+- [ ] Authorized client `fe053c5f-3692-4f14-aef2-ee34fc081cae` for `access_as_user`
 - [ ] App registration redirect URI matches the connector URI
 - [ ] Federated identity credential configured
-- [ ] Connector created in `make.preview.powerapps.com`, secret option = **Use managed identity**
+- [ ] Connector created in `make.powerautomate.com`, secret option = **Use managed identity**
 - [ ] Security tab: Resource URL = `https://<org>.crm.dynamics.com`, Scope = `https://<org>.crm.dynamics.com/.default`
 - [ ] Connector is part of a Dataverse solution and environment-specific fields use environment variables (`@environmentVariables("...")` syntax)
 - [ ] Solution exported as managed (environment variable current values stripped before export)
